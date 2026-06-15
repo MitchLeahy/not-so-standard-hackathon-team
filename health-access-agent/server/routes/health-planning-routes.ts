@@ -67,6 +67,7 @@ function interventionPlan(row: Record<string, unknown>) {
   const facilities = asNumber(row.facility_count);
   const mappedFacilities = asNumber(row.mapped_facility_count);
   const postalOffices = asNumber(row.postal_office_count);
+  const validPostalOffices = asNumber(row.valid_postal_office_count);
 
   const focusAreas: string[] = [];
   if (anemia >= 55) focusAreas.push('anaemia outreach for women 15-49');
@@ -82,8 +83,10 @@ function interventionPlan(row: Record<string, unknown>) {
       `${mappedFacilities} facility record${mappedFacilities === 1 ? '' : 's'} with valid India coordinates`
     );
   }
-  if (postalOffices > 0) {
-    deliveryAssets.push(`${postalOffices} postal office record${postalOffices === 1 ? '' : 's'} for last-mile routing`);
+  if (validPostalOffices > 0) {
+    deliveryAssets.push(
+      `${validPostalOffices} validated postal coordinate${validPostalOffices === 1 ? '' : 's'} for last-mile routing`
+    );
   }
   if (deliveryAssets.length === 0)
     deliveryAssets.push('limited local facility/geography coverage in the supplied data');
@@ -100,7 +103,8 @@ function interventionPlan(row: Record<string, unknown>) {
       `Anaemia among women 15-49: ${anemia.toFixed(1)}%.`,
       `Institutional births: ${institutionalBirth.toFixed(1)}%.`,
       `Households with a member covered by health insurance: ${insurance.toFixed(1)}%.`,
-      `Facility and postal counts use the repaired geography crosswalk and pincode-assisted matching view.`,
+      `${validPostalOffices.toLocaleString()} of ${postalOffices.toLocaleString()} postal rows have usable coordinates for geospatial planning.`,
+      `Facility and postal counts use the repaired geography crosswalk, pincode-assisted matching, and district geo fallback view.`,
     ],
     caveat:
       'Remaining zero counts are still coverage warnings, not proof that a district has no facilities or postal offices.',
@@ -217,7 +221,13 @@ export async function setupHealthPlanningRoutes(appkit: AppKitWithLakebase) {
           source: {
             catalog: 'databricks_virtue_foundation_dataset_dais_2026',
             syncedTable: 'hackathon_health_lakebase.public.district_planning',
+            sourceView: 'workspace.default.hackathon_district_planning_serving',
             refreshMode: 'Lakebase snapshot sync',
+            upstreamInputs: [
+              'workspace.default.hackathon_health_indicators_serving',
+              'workspace.default.hackathon_facilities_serving',
+              'workspace.default.hackathon_pincode_serving',
+            ],
           },
         });
       } catch (err) {
