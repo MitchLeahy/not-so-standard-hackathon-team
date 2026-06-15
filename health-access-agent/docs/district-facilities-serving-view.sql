@@ -1,29 +1,9 @@
-CREATE OR REPLACE VIEW workspace.default.hackathon_district_planning_serving AS
+CREATE OR REPLACE VIEW workspace.default.hackathon_district_facilities_serving AS
 WITH health_base AS (
   SELECT
     district_key,
     trim(district_name) AS district_name,
-    trim(state_ut) AS state_ut,
-    households_surveyed,
-    women_15_49_interviewed,
-    hh_improved_water_pct,
-    hh_use_improved_sanitation_pct,
-    households_using_clean_fuel_for_cooking_pct,
-    hh_member_covered_health_insurance_pct,
-    women_age_15_49_who_are_literate_pct,
-    women_age_15_49_with_10_or_more_years_of_schooling_pct,
-    institutional_birth_5y_pct,
-    institutional_birth_in_public_facility_5y_pct,
-    births_attended_by_skilled_hp_5y_10_pct,
-    prev_diarrhoea_2wk_child_u5_pct,
-    children_prev_symptoms_of_acute_respiratory_infection_ari_2_pct,
-    women_age_15_49_years_whose_bmi_bmi_is_underweight_bmi_lt_1_pct,
-    all_w15_49_who_are_anaemic_pct,
-    w15_plus_with_high_bp_sys_gte_140_mmhg_and_or_dia_gte_90_mm_pct,
-    m15_plus_with_high_bp_sys_gte_140_mmhg_and_or_dia_gte_90_mm_pct,
-    women_age_30_49_years_ever_undergone_a_cervical_screen_pct,
-    w15_plus_who_use_any_kind_of_tobacco_pct,
-    m15_plus_who_use_any_kind_of_tobacco_pct
+    trim(state_ut) AS state_ut
   FROM workspace.default.hackathon_health_indicators_serving
 ),
 health_norm AS (
@@ -113,7 +93,6 @@ pincode_norm AS (
       WHEN 'tumkur' THEN 'tumakuru'
       ELSE district_key_raw
     END AS district_key_name,
-    officename,
     TRY_CAST(latitude AS DOUBLE) AS latitude_num,
     TRY_CAST(longitude AS DOUBLE) AS longitude_num,
     CASE
@@ -129,20 +108,6 @@ pincode_norm AS (
       trim(regexp_replace(regexp_replace(lower(district), '&', ' and '), '[^a-z0-9]+', ' ')) AS district_key_raw
     FROM databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.india_post_pincode_directory
   )
-),
-pincode_counts AS (
-  SELECT
-    h.district_key,
-    COUNT(*) AS postal_office_count,
-    COUNT(DISTINCT p.pincode_text) AS pincode_count,
-    SUM(p.has_valid_india_coordinates) AS valid_postal_office_count,
-    COUNT(DISTINCT CASE WHEN p.has_valid_india_coordinates = 1 THEN p.pincode_text END) AS valid_pincode_count,
-    SUM(CASE WHEN p.has_valid_india_coordinates = 0 THEN 1 ELSE 0 END) AS invalid_postal_coordinate_count
-  FROM pincode_norm p
-  INNER JOIN health_norm h
-    ON p.state_key = h.state_key
-   AND p.district_key_name = h.district_key_name
-  GROUP BY h.district_key
 ),
 pincode_district_candidates AS (
   SELECT
@@ -176,8 +141,7 @@ district_geo_index AS (
     MIN(p.latitude_num) AS min_latitude,
     MAX(p.latitude_num) AS max_latitude,
     MIN(p.longitude_num) AS min_longitude,
-    MAX(p.longitude_num) AS max_longitude,
-    COUNT(*) AS valid_postal_points
+    MAX(p.longitude_num) AS max_longitude
   FROM pincode_norm p
   INNER JOIN health_norm h
     ON p.state_key = h.state_key
@@ -195,6 +159,12 @@ facility_norm AS (
     trim(regexp_replace(regexp_replace(lower(concat_ws(' ', coalesce(address_line1, ''), coalesce(address_line2, ''), coalesce(address_line3, ''), coalesce(address_city, ''), coalesce(address_stateOrRegion, ''), coalesce(address_zipOrPostcode, ''))), '&', ' and '), '[^a-z0-9]+', ' ')) AS normalized_address,
     facilityTypeId,
     operatorTypeId,
+    address_line1,
+    address_line2,
+    address_line3,
+    address_city,
+    address_stateOrRegion,
+    regexp_extract(coalesce(address_zipOrPostcode, ''), '([0-9]{6})', 1) AS pincode_text,
     specialties,
     description,
     procedure,
@@ -204,11 +174,6 @@ facility_norm AS (
     capacity,
     officialPhone,
     officialWebsite,
-    distinct_social_media_presence_count,
-    affiliated_staff_presence,
-    custom_logo_presence,
-    post_metrics_post_count,
-    engagement_metrics_n_followers,
     latitude,
     longitude,
     CASE state_key_raw
@@ -239,7 +204,6 @@ facility_norm AS (
       WHEN 'tumkur' THEN 'tumakuru'
       ELSE city_key_raw
     END AS address_city_key,
-    regexp_extract(coalesce(address_zipOrPostcode, ''), '([0-9]{6})', 1) AS pincode_text,
     CASE
       WHEN latitude BETWEEN 6 AND 38 AND longitude BETWEEN 68 AND 98 THEN 1
       ELSE 0
@@ -301,11 +265,6 @@ facility_norm AS (
       + CASE WHEN TRY_CAST(capacity AS DOUBLE) > 0 THEN 1 ELSE 0 END
       + CASE WHEN trim(coalesce(officialPhone, '')) <> '' THEN 1 ELSE 0 END
       + CASE WHEN trim(coalesce(officialWebsite, '')) <> '' THEN 1 ELSE 0 END
-      + CASE WHEN TRY_CAST(distinct_social_media_presence_count AS DOUBLE) > 0 THEN 1 ELSE 0 END
-      + CASE WHEN lower(coalesce(affiliated_staff_presence, '')) = 'true' THEN 1 ELSE 0 END
-      + CASE WHEN lower(coalesce(custom_logo_presence, '')) = 'true' THEN 1 ELSE 0 END
-      + CASE WHEN TRY_CAST(post_metrics_post_count AS DOUBLE) > 0 THEN 1 ELSE 0 END
-      + CASE WHEN TRY_CAST(engagement_metrics_n_followers AS DOUBLE) > 0 THEN 1 ELSE 0 END
     ) AS facility_quality_signal_count,
     (
       CASE WHEN NOT (latitude BETWEEN 6 AND 38 AND longitude BETWEEN 68 AND 98) THEN 1 ELSE 0 END
@@ -331,7 +290,6 @@ facility_geography_candidates AS (
     f.unique_id,
     g.district_key,
     g.state_key,
-    POWER(f.latitude - g.centroid_latitude, 2) + POWER(f.longitude - g.centroid_longitude, 2) AS distance_score,
     ROW_NUMBER() OVER (
       PARTITION BY f.unique_id
       ORDER BY POWER(f.latitude - g.centroid_latitude, 2) + POWER(f.longitude - g.centroid_longitude, 2)
@@ -350,8 +308,7 @@ facility_geography_match AS (
 ),
 facility_to_district AS (
   SELECT
-    f.unique_id,
-    f.name,
+    f.*,
     CASE
       WHEN length(regexp_replace(f.normalized_name_core, '\\s+', '')) >= 8 AND f.pincode_text <> ''
         THEN sha2(concat_ws('|', 'fuzzy_name_pincode', regexp_replace(f.normalized_name_core, '\\s+', ''), f.pincode_text), 256)
@@ -371,14 +328,6 @@ facility_to_district AS (
       WHEN nullif(trim(f.cluster_id), '') IS NOT NULL THEN 'cluster_id'
       ELSE 'unique_id'
     END AS dedupe_method,
-    f.latitude,
-    f.longitude,
-    f.has_valid_india_coordinates,
-    f.has_maternal_child_signal,
-    f.has_emergency_signal,
-    f.is_service_ready,
-    f.facility_quality_signal_count,
-    f.facility_quality_warning_count,
     coalesce(h_pincode.district_key, h_city.district_key, h_geo.district_key) AS district_key,
     coalesce(h_pincode.state_key, h_city.state_key, h_geo.state_key, f.address_state_key) AS district_state_key,
     CASE
@@ -399,169 +348,89 @@ facility_to_district AS (
   LEFT JOIN facility_geography_match h_geo
     ON f.unique_id = h_geo.unique_id
 ),
-facility_deduped AS (
+facility_ranked AS (
   SELECT
-    district_key,
-    facility_dedupe_key,
-    MIN(dedupe_method) AS dedupe_method,
-    COUNT(DISTINCT unique_id) AS facility_record_count,
-    MAX(has_valid_india_coordinates) AS has_valid_india_coordinates,
-    MAX(has_maternal_child_signal) AS has_maternal_child_signal,
-    MAX(has_emergency_signal) AS has_emergency_signal,
-    MAX(is_service_ready) AS is_service_ready,
-    MAX(facility_quality_signal_count) AS facility_quality_signal_count,
-    MAX(facility_quality_warning_count)
-      + CASE WHEN COUNT(DISTINCT unique_id) > 1 THEN COUNT(DISTINCT unique_id) - 1 ELSE 0 END AS facility_quality_warning_count
-  FROM facility_to_district
-  WHERE district_key IS NOT NULL
-  GROUP BY district_key, facility_dedupe_key
-),
-facility_profiles AS (
-  SELECT
-    district_key,
-    district_state_key,
-    facility_dedupe_key,
-    MIN(name) AS representative_facility_name,
-    AVG(CASE WHEN has_valid_india_coordinates = 1 THEN latitude END) AS facility_latitude,
-    AVG(CASE WHEN has_valid_india_coordinates = 1 THEN longitude END) AS facility_longitude,
-    MAX(has_valid_india_coordinates) AS has_valid_india_coordinates,
-    MAX(is_service_ready) AS is_service_ready
-  FROM facility_to_district
-  WHERE district_key IS NOT NULL
-  GROUP BY district_key, district_state_key, facility_dedupe_key
-),
-district_accessibility_candidates AS (
-  SELECT
-    g.district_key,
-    fp.facility_dedupe_key AS nearest_service_ready_facility_key,
-    fp.representative_facility_name AS nearest_service_ready_facility_name,
-    fp.district_key AS nearest_service_ready_facility_district_key,
-    round(
-      111.32 * sqrt(
-        power(g.centroid_latitude - fp.facility_latitude, 2)
-        + power((g.centroid_longitude - fp.facility_longitude) * cos(radians(g.centroid_latitude)), 2)
-      ),
-      2
-    ) AS nearest_service_ready_distance_km,
+    f.*,
+    h.district_name,
+    h.state_ut,
+    g.centroid_latitude,
+    g.centroid_longitude,
+    COUNT(*) OVER (PARTITION BY f.district_key, f.facility_dedupe_key) AS duplicate_group_size,
     ROW_NUMBER() OVER (
-      PARTITION BY g.district_key
-      ORDER BY
-        111.32 * sqrt(
-          power(g.centroid_latitude - fp.facility_latitude, 2)
-          + power((g.centroid_longitude - fp.facility_longitude) * cos(radians(g.centroid_latitude)), 2)
-        ),
-        fp.representative_facility_name
-    ) AS accessibility_rank
-  FROM district_geo_index g
-  INNER JOIN facility_profiles fp
-    ON g.state_key = fp.district_state_key
-   AND fp.is_service_ready = 1
-   AND fp.has_valid_india_coordinates = 1
-   AND fp.facility_latitude IS NOT NULL
-   AND fp.facility_longitude IS NOT NULL
-),
-district_accessibility AS (
-  SELECT
-    district_key,
-    nearest_service_ready_facility_key,
-    nearest_service_ready_facility_name,
-    nearest_service_ready_facility_district_key,
-    nearest_service_ready_distance_km,
-    CAST(round(20 + nearest_service_ready_distance_km * 1.8) AS BIGINT) AS estimated_travel_minutes
-  FROM district_accessibility_candidates
-  WHERE accessibility_rank = 1
-),
-facility_counts AS (
-  SELECT
-    f.district_key,
-    COUNT(DISTINCT f.unique_id) AS facility_count,
-    COUNT(DISTINCT CASE WHEN f.has_valid_india_coordinates = 1 THEN f.unique_id END) AS mapped_facility_count,
-    COUNT(DISTINCT CASE WHEN f.has_maternal_child_signal = 1 THEN f.unique_id END) AS maternal_child_facility_count,
-    COUNT(DISTINCT CASE WHEN f.match_method = 'pincode' THEN f.unique_id END) AS pincode_matched_facility_count,
-    COUNT(DISTINCT CASE WHEN f.match_method = 'city' THEN f.unique_id END) AS city_matched_facility_count,
-    COUNT(DISTINCT CASE WHEN f.match_method = 'coordinate' THEN f.unique_id END) AS coordinate_matched_facility_count,
-    COUNT(DISTINCT d.facility_dedupe_key) AS deduped_facility_count,
-    COUNT(DISTINCT f.unique_id) - COUNT(DISTINCT d.facility_dedupe_key) AS duplicate_facility_record_count,
-    COUNT(DISTINCT CASE WHEN d.is_service_ready = 1 THEN d.facility_dedupe_key END) AS service_ready_facility_count,
-    COUNT(DISTINCT CASE WHEN d.has_emergency_signal = 1 THEN d.facility_dedupe_key END) AS emergency_ready_facility_count,
-    COUNT(DISTINCT CASE WHEN d.has_maternal_child_signal = 1 THEN d.facility_dedupe_key END) AS maternal_ready_facility_count,
-    SUM(d.facility_quality_signal_count) AS facility_quality_signal_count,
-    SUM(d.facility_quality_warning_count) AS facility_quality_warning_count
+      PARTITION BY f.district_key, f.facility_dedupe_key
+      ORDER BY f.is_service_ready DESC, f.facility_quality_signal_count DESC, f.unique_id
+    ) AS duplicate_record_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY f.unique_id
+      ORDER BY f.district_key, f.match_method, f.name, f.pincode_text
+    ) AS unique_id_row_rank
   FROM facility_to_district f
-  INNER JOIN facility_deduped d
-    ON f.district_key = d.district_key
-   AND f.facility_dedupe_key = d.facility_dedupe_key
+  INNER JOIN health_norm h
+    ON f.district_key = h.district_key
+  LEFT JOIN district_geo_index g
+    ON f.district_key = g.district_key
   WHERE f.district_key IS NOT NULL
-  GROUP BY f.district_key
 )
 SELECT
-  h.district_key,
-  h.district_name,
-  h.state_ut,
-  h.households_surveyed,
-  h.women_15_49_interviewed,
-  h.hh_improved_water_pct,
-  h.hh_use_improved_sanitation_pct,
-  h.households_using_clean_fuel_for_cooking_pct,
-  h.hh_member_covered_health_insurance_pct,
-  h.women_age_15_49_who_are_literate_pct,
-  h.women_age_15_49_with_10_or_more_years_of_schooling_pct,
-  h.institutional_birth_5y_pct,
-  h.institutional_birth_in_public_facility_5y_pct,
-  h.births_attended_by_skilled_hp_5y_10_pct,
-  h.prev_diarrhoea_2wk_child_u5_pct,
-  h.children_prev_symptoms_of_acute_respiratory_infection_ari_2_pct,
-  h.women_age_15_49_years_whose_bmi_bmi_is_underweight_bmi_lt_1_pct,
-  h.all_w15_49_who_are_anaemic_pct,
-  h.w15_plus_with_high_bp_sys_gte_140_mmhg_and_or_dia_gte_90_mm_pct,
-  h.m15_plus_with_high_bp_sys_gte_140_mmhg_and_or_dia_gte_90_mm_pct,
-  h.women_age_30_49_years_ever_undergone_a_cervical_screen_pct,
-  h.w15_plus_who_use_any_kind_of_tobacco_pct,
-  h.m15_plus_who_use_any_kind_of_tobacco_pct,
-  coalesce(f.facility_count, 0) AS facility_count,
-  coalesce(f.mapped_facility_count, 0) AS mapped_facility_count,
-  coalesce(f.maternal_child_facility_count, 0) AS maternal_child_facility_count,
-  coalesce(f.pincode_matched_facility_count, 0) AS pincode_matched_facility_count,
-  coalesce(f.city_matched_facility_count, 0) AS city_matched_facility_count,
-  coalesce(f.coordinate_matched_facility_count, 0) AS coordinate_matched_facility_count,
-  coalesce(f.deduped_facility_count, 0) AS deduped_facility_count,
-  coalesce(f.duplicate_facility_record_count, 0) AS duplicate_facility_record_count,
-  coalesce(f.service_ready_facility_count, 0) AS service_ready_facility_count,
-  coalesce(f.emergency_ready_facility_count, 0) AS emergency_ready_facility_count,
-  coalesce(f.maternal_ready_facility_count, 0) AS maternal_ready_facility_count,
-  coalesce(f.facility_quality_signal_count, 0) AS facility_quality_signal_count,
-  coalesce(f.facility_quality_warning_count, 0) AS facility_quality_warning_count,
-  a.nearest_service_ready_facility_key,
-  replace(a.nearest_service_ready_facility_name, chr(0), '') AS nearest_service_ready_facility_name,
-  a.nearest_service_ready_facility_district_key,
-  a.nearest_service_ready_distance_km,
-  a.estimated_travel_minutes,
+  sha2(concat_ws('|', unique_id, CAST(unique_id_row_rank AS STRING), district_key), 256) AS facility_row_id,
+  district_key,
+  replace(district_name, chr(0), '') AS district_name,
+  replace(state_ut, chr(0), '') AS state_ut,
+  unique_id,
+  facility_dedupe_key,
+  dedupe_method,
+  duplicate_group_size,
+  duplicate_record_rank,
+  replace(name, chr(0), '') AS name,
+  replace(facilityTypeId, chr(0), '') AS facility_type_id,
+  replace(operatorTypeId, chr(0), '') AS operator_type_id,
+  replace(concat_ws(', ', address_line1, address_line2, address_line3), chr(0), '') AS address_line,
+  replace(address_city, chr(0), '') AS address_city,
+  replace(address_stateOrRegion, chr(0), '') AS address_state_or_region,
+  pincode_text,
+  latitude,
+  longitude,
+  has_valid_india_coordinates,
+  match_method,
+  is_service_ready,
+  has_emergency_signal,
+  has_maternal_child_signal,
+  facility_quality_signal_count,
+  facility_quality_warning_count + CASE WHEN duplicate_group_size > 1 THEN duplicate_group_size - 1 ELSE 0 END AS facility_quality_warning_count,
+  concat_ws(
+    ', ',
+    CASE WHEN has_valid_india_coordinates = 0 THEN 'invalid_or_missing_coordinates' END,
+    CASE WHEN duplicate_group_size > 1 THEN 'duplicate_facility_claim' END,
+    CASE WHEN trim(coalesce(facilityTypeId, '')) = '' THEN 'missing_facility_type' END,
+    CASE WHEN trim(coalesce(operatorTypeId, '')) = '' THEN 'missing_operator_type' END,
+    CASE WHEN trim(coalesce(officialPhone, '')) = '' AND trim(coalesce(officialWebsite, '')) = '' THEN 'missing_contact_or_website' END,
+    CASE WHEN trim(coalesce(specialties, '')) = '' AND trim(coalesce(procedure, '')) = '' AND trim(coalesce(equipment, '')) = '' AND trim(coalesce(capability, '')) = '' THEN 'missing_service_evidence' END
+  ) AS quality_warnings,
+  replace(officialPhone, chr(0), '') AS official_phone,
+  replace(officialWebsite, chr(0), '') AS official_website,
+  replace(numberDoctors, chr(0), '') AS number_doctors,
+  replace(capacity, chr(0), '') AS capacity,
+  replace(specialties, chr(0), '') AS specialties,
+  replace(procedure, chr(0), '') AS procedure,
+  replace(equipment, chr(0), '') AS equipment,
+  replace(capability, chr(0), '') AS capability,
   CASE
-    WHEN g.district_key IS NULL THEN 'no_pincode_centroid'
-    WHEN a.nearest_service_ready_distance_km IS NULL THEN 'no_service_ready_facility_coordinate'
-    ELSE 'same_state_pincode_centroid_to_service_ready_facility'
-  END AS accessibility_method,
-  coalesce(p.postal_office_count, 0) AS postal_office_count,
-  coalesce(p.pincode_count, 0) AS pincode_count,
-  coalesce(p.valid_postal_office_count, 0) AS valid_postal_office_count,
-  coalesce(p.valid_pincode_count, 0) AS valid_pincode_count,
-  coalesce(p.invalid_postal_coordinate_count, 0) AS invalid_postal_coordinate_count,
-  round(
-    (coalesce(h.all_w15_49_who_are_anaemic_pct, 0) * 0.22)
-    + ((100 - coalesce(h.institutional_birth_5y_pct, 0)) * 0.18)
-    + ((100 - coalesce(h.hh_member_covered_health_insurance_pct, 0)) * 0.16)
-    + ((100 - coalesce(h.hh_use_improved_sanitation_pct, 0)) * 0.14)
-    + ((100 - coalesce(h.hh_improved_water_pct, 0)) * 0.12)
-    + (coalesce(h.prev_diarrhoea_2wk_child_u5_pct, 0) * 0.10)
-    + ((100 - coalesce(h.women_age_30_49_years_ever_undergone_a_cervical_screen_pct, 0)) * 0.08),
-    2
-  ) AS composite_need_score
-FROM health_norm h
-LEFT JOIN facility_counts f
-  ON h.district_key = f.district_key
-LEFT JOIN pincode_counts p
-  ON h.district_key = p.district_key
-LEFT JOIN district_geo_index g
-  ON h.district_key = g.district_key
-LEFT JOIN district_accessibility a
-  ON h.district_key = a.district_key
+    WHEN has_valid_india_coordinates = 1 AND centroid_latitude IS NOT NULL AND centroid_longitude IS NOT NULL THEN round(
+      111.32 * sqrt(
+        power(centroid_latitude - latitude, 2)
+        + power((centroid_longitude - longitude) * cos(radians(centroid_latitude)), 2)
+      ),
+      2
+    )
+  END AS distance_to_district_centroid_km,
+  CASE
+    WHEN has_valid_india_coordinates = 1 AND centroid_latitude IS NOT NULL AND centroid_longitude IS NOT NULL THEN CAST(round(
+      20 + (
+        111.32 * sqrt(
+          power(centroid_latitude - latitude, 2)
+          + power((centroid_longitude - longitude) * cos(radians(centroid_latitude)), 2)
+        )
+      ) * 1.8
+    ) AS BIGINT)
+  END AS estimated_travel_minutes_to_district_centroid
+FROM facility_ranked
