@@ -28,6 +28,13 @@ test('smoke test - app loads and displays home page', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Scenario simulator' })).toBeVisible();
   await expect(page.getByText('Facility claim extraction', { exact: true })).toBeVisible();
   await expect(page.getByText('Contradiction flags', { exact: true })).toBeVisible();
+  await expect(page.getByText('Data repair ledger')).toBeVisible();
+  await expect(page.getByText('Impact tracker')).toBeVisible();
+  await expect(page.getByText('Official boundary limitation')).toBeVisible();
+  await expect(page.getByText('Facility dedupe and readiness')).toBeVisible();
+  await expect(page.getByText('deduped facility profiles').first()).toBeVisible();
+  await expect(page.getByText('service-ready facilities').first()).toBeVisible();
+  await expect(page.getByText('quality warnings').first()).toBeVisible();
   await expect(page.getByText('Recommended planner note')).toBeVisible();
 });
 

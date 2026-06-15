@@ -39,6 +39,13 @@ interface Summary {
   pincode_matched_facility_count: string | number;
   city_matched_facility_count: string | number;
   coordinate_matched_facility_count: string | number;
+  deduped_facility_count: string | number;
+  duplicate_facility_record_count: string | number;
+  service_ready_facility_count: string | number;
+  emergency_ready_facility_count: string | number;
+  maternal_ready_facility_count: string | number;
+  facility_quality_signal_count: string | number;
+  facility_quality_warning_count: string | number;
   postal_office_count: string | number;
   pincode_count: string | number;
   valid_postal_office_count: string | number;
@@ -62,6 +69,13 @@ interface District {
   pincode_matched_facility_count: string | number;
   city_matched_facility_count: string | number;
   coordinate_matched_facility_count: string | number;
+  deduped_facility_count: string | number;
+  duplicate_facility_record_count: string | number;
+  service_ready_facility_count: string | number;
+  emergency_ready_facility_count: string | number;
+  maternal_ready_facility_count: string | number;
+  facility_quality_signal_count: string | number;
+  facility_quality_warning_count: string | number;
   postal_office_count: string | number;
   pincode_count: string | number;
   valid_postal_office_count: string | number;
@@ -102,6 +116,13 @@ interface Overview {
       coordinateMatchedFacilities: number;
       validPostalOfficeCoordinatesSurfaced: number;
       invalidPostalCoordinateWarnings: number;
+      dedupedFacilityCount: number;
+      duplicateFacilityRecordCount: number;
+      serviceReadyFacilityCount: number;
+      emergencyReadyFacilityCount: number;
+      maternalReadyFacilityCount: number;
+      facilityQualitySignalCount: number;
+      facilityQualityWarningCount: number;
     };
     fixes: RepairStep[];
   };
@@ -209,17 +230,23 @@ function districtNeed(district: District) {
 
 function districtTrust(district: District) {
   const facilityCount = Math.max(1, asNumber(district.facility_count));
+  const dedupedCount = Math.max(1, asNumber(district.deduped_facility_count));
   const mappedShare = percent(district.mapped_facility_count, facilityCount);
-  const pincodeShare = percent(district.pincode_matched_facility_count, facilityCount);
+  const serviceReadyShare = percent(district.service_ready_facility_count, dedupedCount);
+  const warningPressure = percent(
+    district.facility_quality_warning_count,
+    Math.max(1, asNumber(district.facility_quality_signal_count))
+  );
   const postalShare = percent(district.valid_postal_office_count, Math.max(1, asNumber(district.postal_office_count)));
-  return clamp(Math.round(mappedShare * 0.45 + pincodeShare * 0.25 + postalShare * 0.3));
+  return clamp(Math.round(mappedShare * 0.3 + serviceReadyShare * 0.35 + postalShare * 0.25 - warningPressure * 0.1));
 }
 
 function districtAccess(district: District) {
-  const facilitySignal = Math.min(55, asNumber(district.facility_count) * 3);
+  const facilitySignal = Math.min(45, asNumber(district.deduped_facility_count) * 3);
+  const readySignal = Math.min(20, asNumber(district.service_ready_facility_count) * 2);
   const postalSignal = Math.min(30, asNumber(district.valid_pincode_count) * 2);
-  const maternalSignal = Math.min(15, asNumber(district.maternal_child_facility_count) * 2);
-  return clamp(Math.round(facilitySignal + postalSignal + maternalSignal));
+  const maternalSignal = Math.min(10, asNumber(district.maternal_ready_facility_count) * 2);
+  return clamp(Math.round(facilitySignal + readySignal + postalSignal + maternalSignal));
 }
 
 function travelMinutes(district: District) {
@@ -330,8 +357,9 @@ export function HealthPlanningPage() {
     asNumber(summary.districts_with_facilities) - dataQuality.currentRoundBefore.districtsWithFacilities;
   const validPostalShare = percent(summary.valid_postal_office_count, summary.postal_office_count);
   const validPincodeShare = percent(summary.valid_pincode_count, summary.pincode_count);
-  const trustedFacilityShare = percent(summary.mapped_facility_count, summary.facility_count);
+  const trustedFacilityShare = percent(summary.service_ready_facility_count, summary.deduped_facility_count);
   const pincodeFacilityShare = percent(summary.pincode_matched_facility_count, summary.facility_count);
+  const duplicateClaims = asNumber(summary.duplicate_facility_record_count);
   const peopleReached = selectedDistrict
     ? Math.round((selectedNeed * 1800 + asNumber(selectedDistrict.valid_pincode_count) * 12000) / 1000) * 1000
     : 0;
@@ -391,9 +419,9 @@ export function HealthPlanningPage() {
             <RibbonKpi icon={<HeartPulse />} label="High need" value={formatNumber(summary.high_need_districts)} />
             <RibbonKpi icon={<ShieldCheck />} label="Trusted facilities" value={`${trustedFacilityShare}%`} />
             <RibbonKpi
-              icon={<Route />}
-              label="Geocoded postal"
-              value={formatNumber(summary.valid_postal_office_count)}
+              icon={<ShieldAlert />}
+              label="Quality warnings"
+              value={formatNumber(summary.facility_quality_warning_count)}
             />
             <RibbonKpi icon={<Route />} label="Avg travel" value={`${selectedTravel}m`} />
           </div>
@@ -442,7 +470,12 @@ export function HealthPlanningPage() {
                         <Score label="Trust" tone={trust < 50 ? 'warning' : 'success'} value={trust} />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-1.5">
-                        <Badge variant="outline">{formatNumber(district.facility_count)} facility claims</Badge>
+                        <Badge variant="outline">
+                          {formatNumber(district.deduped_facility_count)} deduped facilities
+                        </Badge>
+                        <Badge variant="outline">
+                          {formatNumber(district.service_ready_facility_count)} service ready
+                        </Badge>
                         <Badge variant="outline">{formatNumber(district.valid_pincode_count)} valid pincodes</Badge>
                         <Badge variant="outline">
                           {formatNumber(district.valid_postal_office_count)} geocoded postal
@@ -633,26 +666,36 @@ export function HealthPlanningPage() {
 
               {selectedDistrict && (
                 <>
-                  <div className="absolute bottom-3 left-3 right-3 z-30 rounded-md border bg-background/95 p-3 shadow-sm backdrop-blur">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="absolute bottom-4 left-4 right-4 z-30 rounded-md border bg-background/95 p-4 shadow-sm backdrop-blur">
+                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <div className="text-base font-semibold">
+                        <div className="text-lg font-semibold">
                           {selectedDistrict.district_name}, {selectedDistrict.state_ut}
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {formatNumber(selectedDistrict.facility_count)} claims ·{' '}
-                          {formatNumber(selectedDistrict.valid_pincode_count)} pincodes ·{' '}
-                          {formatNumber(selectedDistrict.invalid_postal_coordinate_count)} geo warnings
+                        <div className="text-sm text-muted-foreground">
+                          High need meets low trusted access: {formatNumber(selectedDistrict.facility_count)} facility
+                          claims, {formatNumber(selectedDistrict.deduped_facility_count)} deduped profiles,{' '}
+                          {formatNumber(selectedDistrict.valid_pincode_count)} validated pincodes, and{' '}
+                          {formatNumber(selectedDistrict.facility_quality_warning_count)} facility quality warnings.
                         </div>
                       </div>
                       <Badge variant="destructive">{selectedTravel} min to trusted care</Badge>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <MapMetric
+                        label="Population proxy"
+                        value={`${peopleReached.toLocaleString()} reached`}
+                        percent={72}
+                      />
+                      <MapMetric label="Need score" value={`${selectedNeed}/100`} percent={selectedNeed} />
+                      <MapMetric label="Access score" value={`${selectedAccess}/100`} percent={selectedAccess} />
                     </div>
                   </div>
                 </>
               )}
             </div>
 
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2">
               <PipelineStep
                 icon={<Database />}
                 title="Lakebase"
@@ -666,9 +709,24 @@ export function HealthPlanningPage() {
               />
               <PipelineStep
                 icon={<ShieldCheck />}
-                title="Routing assets"
-                text={`${validPostalShare}% postal rows and ${validPincodeShare}% pincodes validated`}
+                title="Impact tracker"
+                text={`${formatNumber(summary.service_ready_facility_count)} service-ready profiles; ${duplicateClaims.toLocaleString()} duplicate claims separated`}
               />
+            </div>
+
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                <FileSearch className="h-4 w-4 text-muted-foreground" />
+                Data repair ledger
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {dataQuality.fixes.map((fix) => (
+                  <div key={fix.title} className="rounded-md border bg-background p-3">
+                    <div className="mb-1 text-sm font-semibold">{fix.title}</div>
+                    <div className="text-xs text-muted-foreground">{fix.detail}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="rounded-md border bg-background p-4">
@@ -682,7 +740,7 @@ export function HealthPlanningPage() {
                 </div>
                 <Badge variant="secondary">Issue #3 aligned</Badge>
               </div>
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3">
                 <ContractMetric
                   label="Facility match split"
                   value={`${formatNumber(summary.pincode_matched_facility_count)} / ${formatNumber(summary.city_matched_facility_count)} / ${formatNumber(summary.coordinate_matched_facility_count)}`}
@@ -691,12 +749,12 @@ export function HealthPlanningPage() {
                 <ContractMetric
                   label="Validated reach"
                   value={`${formatNumber(summary.valid_postal_office_count)} postal`}
-                  detail={`${formatNumber(summary.valid_pincode_count)} valid pincodes; ${pincodeFacilityShare}% facility rows pincode matched`}
+                  detail={`${formatNumber(summary.valid_pincode_count)} valid pincodes; ${validPostalShare}% postal rows and ${validPincodeShare}% pincodes validated`}
                 />
                 <ContractMetric
                   label="Warning layer"
                   value={formatNumber(summary.invalid_postal_coordinate_count)}
-                  detail="invalid postal coordinates shown as risk, not routing capacity"
+                  detail={`${pincodeFacilityShare}% facility rows pincode matched; invalid postal rows stay risk-only`}
                 />
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -738,7 +796,16 @@ export function HealthPlanningPage() {
                 <TrustSection title="Facility claim extraction" icon={<Building2 />}>
                   <ClaimChip label="C-section mentioned" />
                   <ClaimChip
-                    label={`${formatNumber(selectedDistrict.maternal_child_facility_count)} maternal-child records`}
+                    label={`${formatNumber(selectedDistrict.deduped_facility_count)} deduped facility profiles`}
+                  />
+                  <ClaimChip
+                    label={`${formatNumber(selectedDistrict.service_ready_facility_count)} service-ready facilities`}
+                  />
+                  <ClaimChip
+                    label={`${formatNumber(selectedDistrict.maternal_ready_facility_count)} maternal-ready facilities`}
+                  />
+                  <ClaimChip
+                    label={`${formatNumber(selectedDistrict.emergency_ready_facility_count)} emergency-ready facilities`}
                   />
                   <ClaimChip
                     label={`${formatNumber(selectedDistrict.pincode_matched_facility_count)} pincode matched`}
@@ -753,6 +820,14 @@ export function HealthPlanningPage() {
                   <ClaimChip label="blood storage missing" variant="warning" />
                   <ClaimChip label="service claim not verified" variant="warning" />
                   <ClaimChip
+                    label={`${formatNumber(selectedDistrict.duplicate_facility_record_count)} duplicate facility claims`}
+                    variant="warning"
+                  />
+                  <ClaimChip
+                    label={`${formatNumber(selectedDistrict.facility_quality_warning_count)} quality warnings`}
+                    variant="warning"
+                  />
+                  <ClaimChip
                     label={`${formatNumber(selectedDistrict.invalid_postal_coordinate_count)} invalid geo rows`}
                     variant="warning"
                   />
@@ -765,8 +840,18 @@ export function HealthPlanningPage() {
                     institutional births {asNumber(selectedDistrict.institutional_birth_5y_pct).toFixed(1)}%.
                   </EvidenceLine>
                   <EvidenceLine>
-                    Facility coverage: {formatNumber(selectedDistrict.facility_count)} records,{' '}
-                    {formatNumber(selectedDistrict.mapped_facility_count)} with valid India coordinates.
+                    Facility coverage: {formatNumber(selectedDistrict.facility_count)} claim records collapse to{' '}
+                    {formatNumber(selectedDistrict.deduped_facility_count)} deduped planning profiles.
+                  </EvidenceLine>
+                  <EvidenceLine>
+                    Readiness: {formatNumber(selectedDistrict.service_ready_facility_count)} service-ready,{' '}
+                    {formatNumber(selectedDistrict.emergency_ready_facility_count)} emergency-ready, and{' '}
+                    {formatNumber(selectedDistrict.maternal_ready_facility_count)} maternal-ready facility profiles.
+                  </EvidenceLine>
+                  <EvidenceLine>
+                    Facility trust: {formatNumber(selectedDistrict.facility_quality_signal_count)} quality signals,{' '}
+                    {formatNumber(selectedDistrict.facility_quality_warning_count)} warnings, and{' '}
+                    {formatNumber(selectedDistrict.mapped_facility_count)} records with valid India coordinates.
                   </EvidenceLine>
                   <EvidenceLine>
                     Postal reach: {formatNumber(selectedDistrict.valid_postal_office_count)} valid postal coordinates
@@ -807,7 +892,7 @@ export function HealthPlanningPage() {
                 <h3 className="text-lg font-semibold">Scenario simulator</h3>
                 <p className="text-sm text-muted-foreground">
                   Convert a care desert into a concrete field plan. These projected lifts are derived from current need,
-                  repaired facility coverage, validated pincode reach, and geospatial warning counts.
+                  repaired facility coverage, validated pincode reach, readiness signals, and geospatial warning counts.
                 </p>
               </div>
               <Badge variant="secondary">What should the planner do first?</Badge>
@@ -869,6 +954,16 @@ function Legend({ color, label }: { color: string; label: string }) {
       <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
       {label}
     </span>
+  );
+}
+
+function MapMetric({ label, percent: progressValue, value }: { label: string; percent: number; value: string }) {
+  return (
+    <div className="rounded-md border bg-background p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-semibold">{value}</div>
+      <Progress value={clamp(progressValue)} className="mt-2" />
+    </div>
   );
 }
 
