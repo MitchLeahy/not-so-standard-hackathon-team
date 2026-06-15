@@ -23,6 +23,8 @@ test('smoke test - app loads and displays home page', async ({ page }) => {
   await expect(page.getByText('Medical desert queue')).toBeVisible();
   await expect(page.getByText('India access intelligence map')).toBeVisible();
   await expect(page.getByText('Evidence & trust desk')).toBeVisible();
+  await expect(page.getByText('Repaired table contract')).toBeVisible();
+  await expect(page.getByText('Validated reach')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Scenario simulator' })).toBeVisible();
   await expect(page.getByText('Facility claim extraction', { exact: true })).toBeVisible();
   await expect(page.getByText('Contradiction flags', { exact: true })).toBeVisible();
