@@ -20,8 +20,14 @@ interface Summary {
   facility_count: string | number;
   mapped_facility_count: string | number;
   maternal_child_facility_count: string | number;
+  pincode_matched_facility_count: string | number;
+  city_matched_facility_count: string | number;
+  coordinate_matched_facility_count: string | number;
   postal_office_count: string | number;
   pincode_count: string | number;
+  valid_postal_office_count: string | number;
+  valid_pincode_count: string | number;
+  invalid_postal_coordinate_count: string | number;
   high_need_districts: string | number;
   districts_with_facilities: string | number;
   districts_with_postal: string | number;
@@ -37,8 +43,14 @@ interface District {
   facility_count: string | number;
   mapped_facility_count: string | number;
   maternal_child_facility_count: string | number;
+  pincode_matched_facility_count: string | number;
+  city_matched_facility_count: string | number;
+  coordinate_matched_facility_count: string | number;
   postal_office_count: string | number;
   pincode_count: string | number;
+  valid_postal_office_count: string | number;
+  valid_pincode_count: string | number;
+  invalid_postal_coordinate_count: string | number;
   all_w15_49_who_are_anaemic_pct: string | number;
   institutional_birth_5y_pct: string | number;
   hh_member_covered_health_insurance_pct: string | number;
@@ -64,6 +76,16 @@ interface Overview {
       districtsZeroPostal: number;
       facilityRecordsMatched: number;
       postalOfficeRecordsMatched: number;
+    };
+    currentRoundBefore: {
+      districtsWithFacilities: number;
+      districtsWithPostal: number;
+      facilityRecordsMatched: number;
+      mappedFacilityRecords: number;
+      pincodeMatchedFacilities: number;
+      coordinateMatchedFacilities: number;
+      validPostalOfficeCoordinatesSurfaced: number;
+      invalidPostalCoordinateWarnings: number;
     };
     fixes: RepairStep[];
   };
@@ -151,6 +173,10 @@ export function HealthPlanningPage() {
   const districtCount = asNumber(summary.district_count);
   const facilityLift = asNumber(summary.districts_with_facilities) - dataQuality.before.districtsWithFacilities;
   const postalLift = asNumber(summary.districts_with_postal) - dataQuality.before.districtsWithPostal;
+  const currentFacilityLift =
+    asNumber(summary.districts_with_facilities) - dataQuality.currentRoundBefore.districtsWithFacilities;
+  const currentFacilityRecordLift =
+    asNumber(summary.facility_count) - dataQuality.currentRoundBefore.facilityRecordsMatched;
 
   return (
     <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5">
@@ -205,6 +231,18 @@ export function HealthPlanningPage() {
               <MiniKpi label="Valid mapped" value={formatNumber(summary.mapped_facility_count)} />
               <MiniKpi label="Pincodes" value={formatNumber(summary.pincode_count)} />
             </div>
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+              <DeltaKpi
+                label="This round: facility districts"
+                value={formatNumber(summary.districts_with_facilities)}
+                delta={`+${currentFacilityLift.toLocaleString()}`}
+              />
+              <DeltaKpi
+                label="This round: facility records"
+                value={formatNumber(summary.facility_count)}
+                delta={`+${currentFacilityRecordLift.toLocaleString()}`}
+              />
+            </div>
           </CardContent>
         </Card>
       </section>
@@ -233,6 +271,31 @@ export function HealthPlanningPage() {
               <div className="mt-2 font-medium text-foreground">Repo SQL</div>
               <div>{dataQuality.repairSql}</div>
             </div>
+            <div className="rounded-md border bg-background p-3">
+              <div className="mb-3 text-sm font-semibold">Current round before and after</div>
+              <div className="grid gap-2 text-xs text-muted-foreground">
+                <LedgerLine
+                  after={formatNumber(summary.facility_count)}
+                  before={dataQuality.currentRoundBefore.facilityRecordsMatched.toLocaleString()}
+                  label="Matched facility records"
+                />
+                <LedgerLine
+                  after={formatNumber(summary.coordinate_matched_facility_count)}
+                  before={dataQuality.currentRoundBefore.coordinateMatchedFacilities.toLocaleString()}
+                  label="Coordinate fallback matches"
+                />
+                <LedgerLine
+                  after={formatNumber(summary.valid_postal_office_count)}
+                  before={dataQuality.currentRoundBefore.validPostalOfficeCoordinatesSurfaced.toLocaleString()}
+                  label="Valid postal coordinates surfaced"
+                />
+                <LedgerLine
+                  after={formatNumber(summary.invalid_postal_coordinate_count)}
+                  before={dataQuality.currentRoundBefore.invalidPostalCoordinateWarnings.toLocaleString()}
+                  label="Invalid postal coordinates flagged"
+                />
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -253,7 +316,7 @@ export function HealthPlanningPage() {
                 return (
                   <button
                     key={district.district_key}
-                    className={`grid gap-3 rounded-md border p-3 text-left transition md:grid-cols-[48px_minmax(0,1fr)_180px] ${
+                    className={`grid grid-cols-[40px_minmax(0,1fr)] gap-3 rounded-md border p-3 text-left transition ${
                       selected ? 'border-primary bg-muted' : 'bg-background hover:border-foreground/40'
                     }`}
                     onClick={() => setSelectedDistrictKey(district.district_key)}
@@ -268,13 +331,13 @@ export function HealthPlanningPage() {
                       <div className="mt-1 text-sm text-muted-foreground">
                         Need score {asNumber(district.composite_need_score).toFixed(1)} with{' '}
                         {formatNumber(district.facility_count)} facility records and{' '}
-                        {formatNumber(district.postal_office_count)} postal offices.
+                        {formatNumber(district.valid_postal_office_count)} geocoded postal offices.
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="col-span-2 grid grid-cols-3 gap-2 text-xs sm:col-start-2 sm:col-span-1">
                       <MiniStat label="Need" value={asNumber(district.composite_need_score)} />
                       <MiniStat label="Facilities" value={asNumber(district.facility_count)} />
-                      <MiniStat label="Postal" value={asNumber(district.postal_office_count)} />
+                      <MiniStat label="Geo postal" value={asNumber(district.valid_postal_office_count)} />
                     </div>
                   </button>
                 );
@@ -325,8 +388,17 @@ export function HealthPlanningPage() {
                     coordinates.
                   </EvidenceLine>
                   <EvidenceLine>
-                    {formatNumber(selectedDistrict.postal_office_count)} postal offices across{' '}
-                    {formatNumber(selectedDistrict.pincode_count)} pincodes support last-mile planning.
+                    {formatNumber(selectedDistrict.coordinate_matched_facility_count)} facility records were assigned
+                    through the pincode-derived district geography fallback.
+                  </EvidenceLine>
+                  <EvidenceLine>
+                    {formatNumber(selectedDistrict.valid_postal_office_count)} of{' '}
+                    {formatNumber(selectedDistrict.postal_office_count)} postal offices have valid coordinates across{' '}
+                    {formatNumber(selectedDistrict.valid_pincode_count)} validated pincodes.
+                  </EvidenceLine>
+                  <EvidenceLine>
+                    {formatNumber(selectedDistrict.invalid_postal_coordinate_count)} postal rows are retained for counts
+                    but flagged out of geospatial planning.
                   </EvidenceLine>
                 </div>
                 <div className="rounded-md border bg-amber-950/10 p-3 text-sm text-muted-foreground">
@@ -360,6 +432,27 @@ function MiniKpi({ label, value }: { label: string; value: string }) {
     <div className="rounded-md border bg-background p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function DeltaKpi({ delta, label, value }: { delta: string; label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 flex items-center gap-2">
+        <span className="text-lg font-semibold text-foreground">{value}</span>
+        <Badge variant="secondary">{delta}</Badge>
+      </div>
+    </div>
+  );
+}
+
+function LedgerLine({ after, before, label }: { after: string; before: string; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2">
+      <span>{label}</span>
+      <span className="shrink-0 font-medium text-foreground">{`${before} -> ${after}`}</span>
     </div>
   );
 }
@@ -399,7 +492,7 @@ function RepairProgress({
 
 function MiniStat({ label, value }: { label: string; value: number }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-1 text-muted-foreground">{label}</div>
       <div className="font-semibold text-foreground">{Math.round(value).toLocaleString()}</div>
     </div>

@@ -132,10 +132,42 @@ Those richer concepts are currently hard-coded in `HealthPlanningPage.tsx`; they
 - The Lakebase synced table matches the serving view on row count and checked app metrics.
 - `composite_need_score` is bounded in the current data from 20.05 to 53.31, with average 37.11.
 
+## Repairs Applied
+
+### Round 1: Alias and pincode-assisted matching
+
+The first repair normalized state/district aliases and used pincode-assisted facility matching.
+
+Measured impact:
+
+- Districts with facility coverage improved from 326 to 482.
+- Districts with postal coverage improved from 542 to 624.
+- Matched facility records improved from 4,890 to 9,038.
+- Matched postal office records improved from 119,527 to 142,194.
+
+### Round 2: District geo index and pincode coordinate validation
+
+The second repair builds a district geography index from valid India Post pincode coordinates. Facilities now resolve in this order:
+
+1. Pincode majority district from the India Post directory.
+2. Canonicalized city/district text.
+3. Coordinate fallback to the nearest pincode-derived district envelope in the same canonical state.
+
+The serving view also separates pincode/postal totals from geospatially usable rows.
+
+Measured impact:
+
+- Districts with facility coverage improved from 482 to 497.
+- Matched facility records improved from 9,038 to 9,925.
+- Coordinate fallback added 684 facility matches.
+- Matched valid postal office coordinate rows are now surfaced: 130,463.
+- Matched postal rows flagged as invalid or unusable for geospatial planning: 11,731.
+- Valid matched pincodes are now surfaced: 17,762.
+
 ## Recommended Fixes
 
-1. Add a canonical geography crosswalk table for state/UT and district aliases before joining. Include at least spelling fixes (`Maharastra` -> `Maharashtra`), renamed districts (`Belgaum` -> `Belagavi`), old/new district labels, Delhi naming, punctuation, ampersands, and common transliterations.
-2. Separate facility city matching from district matching. Where possible, map facility coordinates or pincodes to districts instead of treating `address_city` as a district.
+1. Replace the pincode-derived district envelope with an official polygon boundary table if one is added to the workspace. The current approach is a strong demo-ready proxy, not a full administrative boundary join.
+2. Expand the canonical geography crosswalk as new false negatives appear, especially for renamed districts and split districts.
 3. Validate coordinates before any spatial use. Keep separate flags for missing, unparseable, outside India bounds, and geocoded confidence.
 4. Deduplicate facility records by `unique_id` and/or `cluster_id`, and suppress rows with blank names from facility counts unless another identifier is trusted.
 5. Normalize pincode lat/lon into numeric columns in a serving view and exclude unparseable/out-of-bounds coordinates from routing/catchment features.
