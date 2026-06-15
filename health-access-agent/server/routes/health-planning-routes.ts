@@ -17,8 +17,14 @@ const DISTRICT_COLUMNS = `
   facility_count,
   mapped_facility_count,
   maternal_child_facility_count,
+  pincode_matched_facility_count,
+  city_matched_facility_count,
+  coordinate_matched_facility_count,
   postal_office_count,
   pincode_count,
+  valid_postal_office_count,
+  valid_pincode_count,
+  invalid_postal_coordinate_count,
   households_surveyed,
   women_15_49_interviewed,
   hh_improved_water_pct,
@@ -126,8 +132,14 @@ export async function setupHealthPlanningRoutes(appkit: AppKitWithLakebase) {
               SUM(facility_count) AS facility_count,
               SUM(mapped_facility_count) AS mapped_facility_count,
               SUM(maternal_child_facility_count) AS maternal_child_facility_count,
+              SUM(pincode_matched_facility_count) AS pincode_matched_facility_count,
+              SUM(city_matched_facility_count) AS city_matched_facility_count,
+              SUM(coordinate_matched_facility_count) AS coordinate_matched_facility_count,
               SUM(postal_office_count) AS postal_office_count,
               SUM(pincode_count) AS pincode_count,
+              SUM(valid_postal_office_count) AS valid_postal_office_count,
+              SUM(valid_pincode_count) AS valid_pincode_count,
+              SUM(invalid_postal_coordinate_count) AS invalid_postal_coordinate_count,
               SUM(CASE WHEN composite_need_score >= 50 THEN 1 ELSE 0 END) AS high_need_districts,
               SUM(CASE WHEN facility_count > 0 THEN 1 ELSE 0 END) AS districts_with_facilities,
               SUM(CASE WHEN postal_office_count > 0 THEN 1 ELSE 0 END) AS districts_with_postal,
@@ -164,6 +176,16 @@ export async function setupHealthPlanningRoutes(appkit: AppKitWithLakebase) {
               facilityRecordsMatched: 4890,
               postalOfficeRecordsMatched: 119527,
             },
+            currentRoundBefore: {
+              districtsWithFacilities: 482,
+              districtsWithPostal: 624,
+              facilityRecordsMatched: 9038,
+              mappedFacilityRecords: 9005,
+              pincodeMatchedFacilities: 0,
+              coordinateMatchedFacilities: 0,
+              validPostalOfficeCoordinatesSurfaced: 0,
+              invalidPostalCoordinateWarnings: 0,
+            },
             fixes: [
               {
                 title: 'Geography crosswalk',
@@ -176,9 +198,19 @@ export async function setupHealthPlanningRoutes(appkit: AppKitWithLakebase) {
                   'Facilities with a usable pincode are assigned through the India Post district mapping before falling back to city/district text.',
               },
               {
-                title: 'Coordinate quality guard',
+                title: 'Facility coordinate quality guard',
                 detail:
                   'Mapped facility counts now include only records with coordinates inside a coarse India bounding box.',
+              },
+              {
+                title: 'District geo index',
+                detail:
+                  'Valid India Post pincode coordinates now form a district centroid and envelope index; unresolved facilities can fall back to the nearest district envelope in the same canonical state.',
+              },
+              {
+                title: 'Pincode coordinate validation',
+                detail:
+                  'Postal and pincode counts now separate total coverage from rows with valid coordinates and rows flagged as unparseable or outside India bounds.',
               },
             ],
           },

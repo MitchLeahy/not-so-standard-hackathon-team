@@ -26,6 +26,8 @@ test('smoke test - app loads and displays home page', async ({ page }) => {
   await expect(page.getByText('Evidence brief')).toBeVisible();
   await expect(page.getByText('Geography crosswalk')).toBeVisible();
   await expect(page.getByText('Pincode-assisted facility matching')).toBeVisible();
+  await expect(page.getByText('District geo index')).toBeVisible();
+  await expect(page.getByText('Pincode coordinate validation')).toBeVisible();
 });
 
 // ── Lifecycle hooks ─────────────────────────────────────────────────────────

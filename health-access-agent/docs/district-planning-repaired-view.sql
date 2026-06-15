@@ -115,7 +115,13 @@ pincode_norm AS (
     END AS district_key_name,
     officename,
     TRY_CAST(latitude AS DOUBLE) AS latitude_num,
-    TRY_CAST(longitude AS DOUBLE) AS longitude_num
+    TRY_CAST(longitude AS DOUBLE) AS longitude_num,
+    CASE
+      WHEN TRY_CAST(latitude AS DOUBLE) BETWEEN 6 AND 38
+        AND TRY_CAST(longitude AS DOUBLE) BETWEEN 68 AND 98
+      THEN 1
+      ELSE 0
+    END AS has_valid_india_coordinates
   FROM (
     SELECT
       *,
@@ -128,25 +134,56 @@ pincode_counts AS (
   SELECT
     h.district_key,
     COUNT(*) AS postal_office_count,
-    COUNT(DISTINCT p.pincode_text) AS pincode_count
+    COUNT(DISTINCT p.pincode_text) AS pincode_count,
+    SUM(p.has_valid_india_coordinates) AS valid_postal_office_count,
+    COUNT(DISTINCT CASE WHEN p.has_valid_india_coordinates = 1 THEN p.pincode_text END) AS valid_pincode_count,
+    SUM(CASE WHEN p.has_valid_india_coordinates = 0 THEN 1 ELSE 0 END) AS invalid_postal_coordinate_count
   FROM pincode_norm p
   INNER JOIN health_norm h
     ON p.state_key = h.state_key
    AND p.district_key_name = h.district_key_name
   GROUP BY h.district_key
 ),
-pincode_single_district AS (
+pincode_district_candidates AS (
   SELECT
     pincode_text,
-    max(state_key) AS state_key,
-    max(district_key_name) AS district_key_name
-  FROM (
-    SELECT DISTINCT pincode_text, state_key, district_key_name
-    FROM pincode_norm
-    WHERE pincode_text IS NOT NULL AND pincode_text <> ''
-  )
-  GROUP BY pincode_text
-  HAVING COUNT(*) = 1
+    state_key,
+    district_key_name,
+    COUNT(*) AS office_count,
+    SUM(has_valid_india_coordinates) AS valid_office_count,
+    ROW_NUMBER() OVER (
+      PARTITION BY pincode_text
+      ORDER BY COUNT(*) DESC, SUM(has_valid_india_coordinates) DESC, state_key, district_key_name
+    ) AS pincode_rank
+  FROM pincode_norm
+  WHERE pincode_text IS NOT NULL
+    AND pincode_text <> ''
+    AND state_key <> ''
+    AND district_key_name <> ''
+  GROUP BY pincode_text, state_key, district_key_name
+),
+pincode_single_district AS (
+  SELECT pincode_text, state_key, district_key_name
+  FROM pincode_district_candidates
+  WHERE pincode_rank = 1
+),
+district_geo_index AS (
+  SELECT
+    h.district_key,
+    h.state_key,
+    AVG(p.latitude_num) AS centroid_latitude,
+    AVG(p.longitude_num) AS centroid_longitude,
+    MIN(p.latitude_num) AS min_latitude,
+    MAX(p.latitude_num) AS max_latitude,
+    MIN(p.longitude_num) AS min_longitude,
+    MAX(p.longitude_num) AS max_longitude,
+    COUNT(*) AS valid_postal_points
+  FROM pincode_norm p
+  INNER JOIN health_norm h
+    ON p.state_key = h.state_key
+   AND p.district_key_name = h.district_key_name
+  WHERE p.has_valid_india_coordinates = 1
+  GROUP BY h.district_key, h.state_key
 ),
 facility_norm AS (
   SELECT
@@ -215,12 +252,39 @@ facility_norm AS (
       AND trim(coalesce(name, '')) <> ''
   )
 ),
+facility_geography_candidates AS (
+  SELECT
+    f.unique_id,
+    g.district_key,
+    POWER(f.latitude - g.centroid_latitude, 2) + POWER(f.longitude - g.centroid_longitude, 2) AS distance_score,
+    ROW_NUMBER() OVER (
+      PARTITION BY f.unique_id
+      ORDER BY POWER(f.latitude - g.centroid_latitude, 2) + POWER(f.longitude - g.centroid_longitude, 2)
+    ) AS geography_rank
+  FROM facility_norm f
+  INNER JOIN district_geo_index g
+    ON f.has_valid_india_coordinates = 1
+   AND f.address_state_key = g.state_key
+   AND f.latitude BETWEEN g.min_latitude - 0.35 AND g.max_latitude + 0.35
+   AND f.longitude BETWEEN g.min_longitude - 0.35 AND g.max_longitude + 0.35
+),
+facility_geography_match AS (
+  SELECT unique_id, district_key
+  FROM facility_geography_candidates
+  WHERE geography_rank = 1
+),
 facility_to_district AS (
   SELECT
     f.unique_id,
     f.has_valid_india_coordinates,
     f.has_maternal_child_signal,
-    coalesce(h_pincode.district_key, h_city.district_key) AS district_key
+    coalesce(h_pincode.district_key, h_city.district_key, h_geo.district_key) AS district_key,
+    CASE
+      WHEN h_pincode.district_key IS NOT NULL THEN 'pincode'
+      WHEN h_city.district_key IS NOT NULL THEN 'city'
+      WHEN h_geo.district_key IS NOT NULL THEN 'coordinate'
+      ELSE 'unmatched'
+    END AS match_method
   FROM facility_norm f
   LEFT JOIN pincode_single_district p
     ON f.pincode_text = p.pincode_text
@@ -230,13 +294,18 @@ facility_to_district AS (
   LEFT JOIN health_norm h_city
     ON f.address_state_key = h_city.state_key
    AND f.address_city_key = h_city.district_key_name
+  LEFT JOIN facility_geography_match h_geo
+    ON f.unique_id = h_geo.unique_id
 ),
 facility_counts AS (
   SELECT
     district_key,
     COUNT(DISTINCT unique_id) AS facility_count,
     COUNT(DISTINCT CASE WHEN has_valid_india_coordinates = 1 THEN unique_id END) AS mapped_facility_count,
-    COUNT(DISTINCT CASE WHEN has_maternal_child_signal = 1 THEN unique_id END) AS maternal_child_facility_count
+    COUNT(DISTINCT CASE WHEN has_maternal_child_signal = 1 THEN unique_id END) AS maternal_child_facility_count,
+    COUNT(DISTINCT CASE WHEN match_method = 'pincode' THEN unique_id END) AS pincode_matched_facility_count,
+    COUNT(DISTINCT CASE WHEN match_method = 'city' THEN unique_id END) AS city_matched_facility_count,
+    COUNT(DISTINCT CASE WHEN match_method = 'coordinate' THEN unique_id END) AS coordinate_matched_facility_count
   FROM facility_to_district
   WHERE district_key IS NOT NULL
   GROUP BY district_key
@@ -268,8 +337,14 @@ SELECT
   coalesce(f.facility_count, 0) AS facility_count,
   coalesce(f.mapped_facility_count, 0) AS mapped_facility_count,
   coalesce(f.maternal_child_facility_count, 0) AS maternal_child_facility_count,
+  coalesce(f.pincode_matched_facility_count, 0) AS pincode_matched_facility_count,
+  coalesce(f.city_matched_facility_count, 0) AS city_matched_facility_count,
+  coalesce(f.coordinate_matched_facility_count, 0) AS coordinate_matched_facility_count,
   coalesce(p.postal_office_count, 0) AS postal_office_count,
   coalesce(p.pincode_count, 0) AS pincode_count,
+  coalesce(p.valid_postal_office_count, 0) AS valid_postal_office_count,
+  coalesce(p.valid_pincode_count, 0) AS valid_pincode_count,
+  coalesce(p.invalid_postal_coordinate_count, 0) AS invalid_postal_coordinate_count,
   round(
     (coalesce(h.all_w15_49_who_are_anaemic_pct, 0) * 0.22)
     + ((100 - coalesce(h.institutional_birth_5y_pct, 0)) * 0.18)
