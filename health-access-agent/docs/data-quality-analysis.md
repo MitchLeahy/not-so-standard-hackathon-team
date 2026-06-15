@@ -156,6 +156,8 @@ Those richer concepts are currently hard-coded in `HealthPlanningPage.tsx`; they
 | Round 3: Boundary limitation, facility dedupe, and readiness signals | Maternal/child-ready facility profiles surfaced |       0 |         6,870 |              +6,870 | Data repair ledger, district evidence brief                        |
 | Round 3: Boundary limitation, facility dedupe, and readiness signals | Facility quality signals counted                |       0 |       131,484 |            +131,484 | Data repair ledger, district evidence brief                        |
 | Round 3: Boundary limitation, facility dedupe, and readiness signals | Facility quality warnings counted               |       0 |         5,201 |              +5,201 | Coverage after repair, data repair ledger, district evidence brief |
+| Round 4: Official boundary source discovery                          | Workspace official boundary table availability  |       0 |             0 |       Still blocked | Data repair ledger, official boundary discovery note               |
+| Round 4: Official boundary source discovery                          | Official boundary source candidates identified  |       0 |             1 |                  +1 | Official boundary discovery note, issue #9                         |
 
 ### Round 1: Alias and pincode-assisted matching
 
@@ -205,9 +207,22 @@ Measured impact:
 - Facility quality warnings counted: 5,201.
 - Districts with service-ready facility coverage: 497.
 
+### Round 4: Official boundary source discovery
+
+A 2026-06-15 workspace search still found no accessible official district boundary, polygon, administrative shape, geography, WKT, or GeoJSON table beyond existing app, source, Lakebase, and system metadata objects.
+
+An official source candidate was identified outside the workspace: the Survey of India Online Maps Portal lists Administrative Boundary Database product `OVSF/1M/7`, described as the entire country up to district level with headquarters in shapefile format. It is not onboarded yet because the portal requires a user-authenticated acquisition path and license/account confirmation.
+
+Measured impact:
+
+- Accessible official boundary polygon tables in the Databricks workspace remain 0.
+- Official boundary source candidates identified: 1.
+- Current district geography remains a pincode-derived centroid/envelope proxy.
+- Source discovery notes are stored in `docs/official-boundary-source-discovery.md`.
+
 ## Recommended Fixes
 
-1. Replace the pincode-derived district envelope with an official polygon boundary table if one is added to the workspace. A 2026-06-15 information schema search did not find an accessible district boundary, polygon, administrative shape, or geo table; the current approach is a demo-ready proxy, not a full administrative boundary join.
+1. Replace the pincode-derived district envelope with an official polygon boundary table if one is added to the workspace. A 2026-06-15 information schema search did not find an accessible district boundary, polygon, administrative shape, or geo table; the current approach is a demo-ready proxy, not a full administrative boundary join. Survey of India product `OVSF/1M/7` is the current official source candidate, pending manual acquisition, license review, and Unity Catalog ingest.
 2. Expand the canonical geography crosswalk as new false negatives appear, especially for renamed districts and split districts.
 3. Validate coordinates before any spatial use. Keep separate flags for missing, unparseable, outside India bounds, and geocoded confidence.
 4. Continue improving dedupe beyond exact normalized name/pincode and rounded-coordinate grouping. The current pass separates clear duplicate claims, but does not attempt fuzzy spelling or provider-network entity resolution.
@@ -226,3 +241,4 @@ High-level checks were run with Databricks CLI v1.3.0 and profile `hackathon2`, 
 - coordinate parse/bounds checks
 - NFHS null/range checks for app-used numeric columns
 - full outer comparison between `workspace.default.hackathon_district_planning_serving` and `hackathon_health_lakebase.public.district_planning`
+- 2026-06-15 official boundary source discovery across accessible Unity Catalog table and column metadata
