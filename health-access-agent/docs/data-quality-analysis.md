@@ -134,6 +134,29 @@ Those richer concepts are currently hard-coded in `HealthPlanningPage.tsx`; they
 
 ## Repairs Applied
 
+## Improvement Impact Tracker
+
+| Repair round                                                         | Impact metric                                   |  Before |         After |              Change | Where it appears in the demo                                       |
+| -------------------------------------------------------------------- | ----------------------------------------------- | ------: | ------------: | ------------------: | ------------------------------------------------------------------ |
+| Round 1: Alias and pincode-assisted matching                         | Districts with facility coverage                |     326 |           482 |                +156 | Coverage after repair, data repair ledger                          |
+| Round 1: Alias and pincode-assisted matching                         | Districts with postal coverage                  |     542 |           624 |                 +82 | Coverage after repair                                              |
+| Round 1: Alias and pincode-assisted matching                         | Matched facility records                        |   4,890 |         9,038 |              +4,148 | Coverage after repair, district evidence brief                     |
+| Round 1: Alias and pincode-assisted matching                         | Matched postal office records                   | 119,527 |       142,194 |             +22,667 | Coverage after repair, district evidence brief                     |
+| Round 2: District geo index and pincode coordinate validation        | Districts with facility coverage                |     482 |           497 |                 +15 | Coverage after repair, data repair ledger                          |
+| Round 2: District geo index and pincode coordinate validation        | Matched facility records                        |   9,038 |         9,925 |                +887 | Coverage after repair, data repair ledger                          |
+| Round 2: District geo index and pincode coordinate validation        | Coordinate fallback matches                     |       0 |           684 |                +684 | Data repair ledger, district evidence brief                        |
+| Round 2: District geo index and pincode coordinate validation        | Valid postal coordinate rows surfaced           |       0 |       130,463 |            +130,463 | Data repair ledger, district evidence brief                        |
+| Round 2: District geo index and pincode coordinate validation        | Invalid postal coordinate warnings surfaced     |       0 |        11,731 |             +11,731 | Data repair ledger, district evidence brief                        |
+| Round 2: District geo index and pincode coordinate validation        | Valid matched pincodes surfaced                 |       0 |        17,762 |             +17,762 | District evidence brief                                            |
+| Round 3: Boundary limitation, facility dedupe, and readiness signals | Official boundary source availability           | Unknown | Not available |   Limitation logged | Data repair ledger, this document                                  |
+| Round 3: Boundary limitation, facility dedupe, and readiness signals | Deduped facility profiles surfaced              |   9,925 |         9,920 | -5 duplicate claims | Coverage after repair, data repair ledger                          |
+| Round 3: Boundary limitation, facility dedupe, and readiness signals | Duplicate facility records separated            |       0 |             5 |                  +5 | Coverage after repair, data repair ledger, district evidence brief |
+| Round 3: Boundary limitation, facility dedupe, and readiness signals | Service-ready facility profiles surfaced        |       0 |         9,891 |              +9,891 | Coverage after repair, data repair ledger, district evidence brief |
+| Round 3: Boundary limitation, facility dedupe, and readiness signals | Emergency-ready facility profiles surfaced      |       0 |         5,690 |              +5,690 | Data repair ledger, district evidence brief                        |
+| Round 3: Boundary limitation, facility dedupe, and readiness signals | Maternal/child-ready facility profiles surfaced |       0 |         6,870 |              +6,870 | Data repair ledger, district evidence brief                        |
+| Round 3: Boundary limitation, facility dedupe, and readiness signals | Facility quality signals counted                |       0 |       131,484 |            +131,484 | Data repair ledger, district evidence brief                        |
+| Round 3: Boundary limitation, facility dedupe, and readiness signals | Facility quality warnings counted               |       0 |         5,201 |              +5,201 | Coverage after repair, data repair ledger, district evidence brief |
+
 ### Round 1: Alias and pincode-assisted matching
 
 The first repair normalized state/district aliases and used pincode-assisted facility matching.
@@ -164,12 +187,30 @@ Measured impact:
 - Matched postal rows flagged as invalid or unusable for geospatial planning: 11,731.
 - Valid matched pincodes are now surfaced: 17,762.
 
+### Round 3: Boundary limitation, facility dedupe, and readiness signals
+
+An information schema search for accessible district boundary, polygon, administrative shape, geography, or geo-index tables found no usable official boundary source beyond the existing NFHS and district planning tables. The app therefore keeps the pincode-derived district centroid/envelope as the current demo proxy and labels it as a limitation rather than presenting it as an official boundary join.
+
+The third repair adds facility identity and readiness rollups at the district grain. Facility records now keep the existing matched-claim count, but also group likely duplicate claims by normalized facility name with pincode, then normalized facility name with rounded coordinates, then normalized name/address, with `cluster_id` and `unique_id` as fallbacks. Readiness signals are computed from facility type/operator, specialties, procedures, equipment, capability text, contact/web fields, doctors/capacity, and trust/presence fields.
+
+Measured impact:
+
+- Matched facility records remain visible as source claims: 9,925.
+- Deduped facility profiles are now surfaced: 9,920.
+- Duplicate facility records separated from planning counts: 5.
+- Service-ready facility profiles surfaced: 9,891.
+- Emergency-ready facility profiles surfaced: 5,690.
+- Maternal/child-ready facility profiles surfaced: 6,870.
+- Facility quality signals counted: 131,484.
+- Facility quality warnings counted: 5,201.
+- Districts with service-ready facility coverage: 497.
+
 ## Recommended Fixes
 
-1. Replace the pincode-derived district envelope with an official polygon boundary table if one is added to the workspace. The current approach is a strong demo-ready proxy, not a full administrative boundary join.
+1. Replace the pincode-derived district envelope with an official polygon boundary table if one is added to the workspace. A 2026-06-15 information schema search did not find an accessible district boundary, polygon, administrative shape, or geo table; the current approach is a demo-ready proxy, not a full administrative boundary join.
 2. Expand the canonical geography crosswalk as new false negatives appear, especially for renamed districts and split districts.
 3. Validate coordinates before any spatial use. Keep separate flags for missing, unparseable, outside India bounds, and geocoded confidence.
-4. Deduplicate facility records by `unique_id` and/or `cluster_id`, and suppress rows with blank names from facility counts unless another identifier is trusted.
+4. Continue improving dedupe beyond exact normalized name/pincode and rounded-coordinate grouping. The current pass separates clear duplicate claims, but does not attempt fuzzy spelling or provider-network entity resolution.
 5. Normalize pincode lat/lon into numeric columns in a serving view and exclude unparseable/out-of-bounds coordinates from routing/catchment features.
 6. Expose uncertainty explicitly in the API. For example, return match coverage rates, unmatched counts, and a "data coverage warning" per district rather than only zero counts.
 7. Decide whether the app is a district-prioritization dashboard or the richer CareGap Planner shown in the frontend. If the latter, add real backend endpoints for facility evidence, catchments, travel-time inputs, trust signals, and notes.

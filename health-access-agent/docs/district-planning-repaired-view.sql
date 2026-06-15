@@ -188,12 +188,26 @@ district_geo_index AS (
 facility_norm AS (
   SELECT
     unique_id,
+    cluster_id,
     name,
+    trim(regexp_replace(regexp_replace(lower(coalesce(name, '')), '&', ' and '), '[^a-z0-9]+', ' ')) AS normalized_name,
+    trim(regexp_replace(regexp_replace(lower(concat_ws(' ', coalesce(address_line1, ''), coalesce(address_line2, ''), coalesce(address_line3, ''), coalesce(address_city, ''), coalesce(address_stateOrRegion, ''), coalesce(address_zipOrPostcode, ''))), '&', ' and '), '[^a-z0-9]+', ' ')) AS normalized_address,
+    facilityTypeId,
+    operatorTypeId,
     specialties,
     description,
     procedure,
     equipment,
     capability,
+    numberDoctors,
+    capacity,
+    officialPhone,
+    officialWebsite,
+    distinct_social_media_presence_count,
+    affiliated_staff_presence,
+    custom_logo_presence,
+    post_metrics_post_count,
+    engagement_metrics_n_followers,
     latitude,
     longitude,
     CASE state_key_raw
@@ -232,15 +246,74 @@ facility_norm AS (
     CASE
       WHEN lower(coalesce(specialties, '')) LIKE '%mater%'
         OR lower(coalesce(specialties, '')) LIKE '%child%'
+        OR lower(coalesce(specialties, '')) LIKE '%gyn%'
+        OR lower(coalesce(specialties, '')) LIKE '%obstetric%'
+        OR lower(coalesce(specialties, '')) LIKE '%neonat%'
+        OR lower(coalesce(specialties, '')) LIKE '%pediatric%'
         OR lower(coalesce(name, '')) LIKE '%mother%'
         OR lower(coalesce(name, '')) LIKE '%child%'
         OR lower(coalesce(description, '')) LIKE '%mater%'
         OR lower(coalesce(description, '')) LIKE '%child%'
+        OR lower(coalesce(procedure, '')) LIKE '%delivery%'
+        OR lower(coalesce(procedure, '')) LIKE '%obstetric%'
+        OR lower(coalesce(procedure, '')) LIKE '%neonat%'
         OR lower(coalesce(capability, '')) LIKE '%mater%'
         OR lower(coalesce(capability, '')) LIKE '%child%'
+        OR lower(coalesce(capability, '')) LIKE '%gyn%'
+        OR lower(coalesce(capability, '')) LIKE '%obstetric%'
+        OR lower(coalesce(capability, '')) LIKE '%neonat%'
+        OR lower(coalesce(capability, '')) LIKE '%pediatric%'
       THEN 1
       ELSE 0
-    END AS has_maternal_child_signal
+    END AS has_maternal_child_signal,
+    CASE
+      WHEN lower(concat_ws(' ', coalesce(name, ''), coalesce(facilityTypeId, ''), coalesce(specialties, ''), coalesce(procedure, ''), coalesce(equipment, ''), coalesce(capability, ''))) RLIKE 'emergency|trauma|ambulance|critical|icu|casualty|24/7|24 hour|24hr|24 hrs'
+      THEN 1
+      ELSE 0
+    END AS has_emergency_signal,
+    CASE
+      WHEN coalesce(nullif(trim(facilityTypeId), ''), nullif(trim(operatorTypeId), '')) IS NOT NULL
+        AND (
+          trim(coalesce(specialties, '')) <> ''
+          OR trim(coalesce(procedure, '')) <> ''
+          OR trim(coalesce(equipment, '')) <> ''
+          OR trim(coalesce(capability, '')) <> ''
+        )
+        AND (
+          trim(coalesce(officialPhone, '')) <> ''
+          OR trim(coalesce(officialWebsite, '')) <> ''
+          OR TRY_CAST(numberDoctors AS DOUBLE) > 0
+          OR TRY_CAST(capacity AS DOUBLE) > 0
+        )
+      THEN 1
+      ELSE 0
+    END AS is_service_ready,
+    (
+      CASE WHEN latitude BETWEEN 6 AND 38 AND longitude BETWEEN 68 AND 98 THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(facilityTypeId, '')) <> '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(operatorTypeId, '')) <> '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(specialties, '')) <> '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(procedure, '')) <> '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(equipment, '')) <> '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(capability, '')) <> '' THEN 1 ELSE 0 END
+      + CASE WHEN TRY_CAST(numberDoctors AS DOUBLE) > 0 THEN 1 ELSE 0 END
+      + CASE WHEN TRY_CAST(capacity AS DOUBLE) > 0 THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(officialPhone, '')) <> '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(officialWebsite, '')) <> '' THEN 1 ELSE 0 END
+      + CASE WHEN TRY_CAST(distinct_social_media_presence_count AS DOUBLE) > 0 THEN 1 ELSE 0 END
+      + CASE WHEN lower(coalesce(affiliated_staff_presence, '')) = 'true' THEN 1 ELSE 0 END
+      + CASE WHEN lower(coalesce(custom_logo_presence, '')) = 'true' THEN 1 ELSE 0 END
+      + CASE WHEN TRY_CAST(post_metrics_post_count AS DOUBLE) > 0 THEN 1 ELSE 0 END
+      + CASE WHEN TRY_CAST(engagement_metrics_n_followers AS DOUBLE) > 0 THEN 1 ELSE 0 END
+    ) AS facility_quality_signal_count,
+    (
+      CASE WHEN NOT (latitude BETWEEN 6 AND 38 AND longitude BETWEEN 68 AND 98) THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(facilityTypeId, '')) = '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(operatorTypeId, '')) = '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(officialPhone, '')) = '' AND trim(coalesce(officialWebsite, '')) = '' THEN 1 ELSE 0 END
+      + CASE WHEN trim(coalesce(specialties, '')) = '' AND trim(coalesce(procedure, '')) = '' AND trim(coalesce(equipment, '')) = '' AND trim(coalesce(capability, '')) = '' THEN 1 ELSE 0 END
+      + CASE WHEN TRY_CAST(numberDoctors AS DOUBLE) IS NULL AND TRY_CAST(capacity AS DOUBLE) IS NULL THEN 1 ELSE 0 END
+    ) AS facility_quality_warning_count
   FROM (
     SELECT
       *,
@@ -276,8 +349,21 @@ facility_geography_match AS (
 facility_to_district AS (
   SELECT
     f.unique_id,
+    CASE
+      WHEN f.normalized_name <> '' AND f.pincode_text <> ''
+        THEN sha2(concat_ws('|', 'name_pincode', f.normalized_name, f.pincode_text), 256)
+      WHEN f.normalized_name <> '' AND f.has_valid_india_coordinates = 1
+        THEN sha2(concat_ws('|', 'name_geo', f.normalized_name, CAST(round(f.latitude, 3) AS STRING), CAST(round(f.longitude, 3) AS STRING)), 256)
+      WHEN f.normalized_name <> '' AND f.normalized_address <> ''
+        THEN sha2(concat_ws('|', 'name_address', f.normalized_name, f.normalized_address), 256)
+      ELSE coalesce(nullif(trim(f.cluster_id), ''), f.unique_id)
+    END AS facility_dedupe_key,
     f.has_valid_india_coordinates,
     f.has_maternal_child_signal,
+    f.has_emergency_signal,
+    f.is_service_ready,
+    f.facility_quality_signal_count,
+    f.facility_quality_warning_count,
     coalesce(h_pincode.district_key, h_city.district_key, h_geo.district_key) AS district_key,
     CASE
       WHEN h_pincode.district_key IS NOT NULL THEN 'pincode'
@@ -297,18 +383,44 @@ facility_to_district AS (
   LEFT JOIN facility_geography_match h_geo
     ON f.unique_id = h_geo.unique_id
 ),
-facility_counts AS (
+facility_deduped AS (
   SELECT
     district_key,
-    COUNT(DISTINCT unique_id) AS facility_count,
-    COUNT(DISTINCT CASE WHEN has_valid_india_coordinates = 1 THEN unique_id END) AS mapped_facility_count,
-    COUNT(DISTINCT CASE WHEN has_maternal_child_signal = 1 THEN unique_id END) AS maternal_child_facility_count,
-    COUNT(DISTINCT CASE WHEN match_method = 'pincode' THEN unique_id END) AS pincode_matched_facility_count,
-    COUNT(DISTINCT CASE WHEN match_method = 'city' THEN unique_id END) AS city_matched_facility_count,
-    COUNT(DISTINCT CASE WHEN match_method = 'coordinate' THEN unique_id END) AS coordinate_matched_facility_count
+    facility_dedupe_key,
+    COUNT(DISTINCT unique_id) AS facility_record_count,
+    MAX(has_valid_india_coordinates) AS has_valid_india_coordinates,
+    MAX(has_maternal_child_signal) AS has_maternal_child_signal,
+    MAX(has_emergency_signal) AS has_emergency_signal,
+    MAX(is_service_ready) AS is_service_ready,
+    MAX(facility_quality_signal_count) AS facility_quality_signal_count,
+    MAX(facility_quality_warning_count)
+      + CASE WHEN COUNT(DISTINCT unique_id) > 1 THEN COUNT(DISTINCT unique_id) - 1 ELSE 0 END AS facility_quality_warning_count
   FROM facility_to_district
   WHERE district_key IS NOT NULL
-  GROUP BY district_key
+  GROUP BY district_key, facility_dedupe_key
+),
+facility_counts AS (
+  SELECT
+    f.district_key,
+    COUNT(DISTINCT f.unique_id) AS facility_count,
+    COUNT(DISTINCT CASE WHEN f.has_valid_india_coordinates = 1 THEN f.unique_id END) AS mapped_facility_count,
+    COUNT(DISTINCT CASE WHEN f.has_maternal_child_signal = 1 THEN f.unique_id END) AS maternal_child_facility_count,
+    COUNT(DISTINCT CASE WHEN f.match_method = 'pincode' THEN f.unique_id END) AS pincode_matched_facility_count,
+    COUNT(DISTINCT CASE WHEN f.match_method = 'city' THEN f.unique_id END) AS city_matched_facility_count,
+    COUNT(DISTINCT CASE WHEN f.match_method = 'coordinate' THEN f.unique_id END) AS coordinate_matched_facility_count,
+    COUNT(DISTINCT d.facility_dedupe_key) AS deduped_facility_count,
+    COUNT(DISTINCT f.unique_id) - COUNT(DISTINCT d.facility_dedupe_key) AS duplicate_facility_record_count,
+    COUNT(DISTINCT CASE WHEN d.is_service_ready = 1 THEN d.facility_dedupe_key END) AS service_ready_facility_count,
+    COUNT(DISTINCT CASE WHEN d.has_emergency_signal = 1 THEN d.facility_dedupe_key END) AS emergency_ready_facility_count,
+    COUNT(DISTINCT CASE WHEN d.has_maternal_child_signal = 1 THEN d.facility_dedupe_key END) AS maternal_ready_facility_count,
+    SUM(d.facility_quality_signal_count) AS facility_quality_signal_count,
+    SUM(d.facility_quality_warning_count) AS facility_quality_warning_count
+  FROM facility_to_district f
+  INNER JOIN facility_deduped d
+    ON f.district_key = d.district_key
+   AND f.facility_dedupe_key = d.facility_dedupe_key
+  WHERE f.district_key IS NOT NULL
+  GROUP BY f.district_key
 )
 SELECT
   h.district_key,
@@ -340,6 +452,13 @@ SELECT
   coalesce(f.pincode_matched_facility_count, 0) AS pincode_matched_facility_count,
   coalesce(f.city_matched_facility_count, 0) AS city_matched_facility_count,
   coalesce(f.coordinate_matched_facility_count, 0) AS coordinate_matched_facility_count,
+  coalesce(f.deduped_facility_count, 0) AS deduped_facility_count,
+  coalesce(f.duplicate_facility_record_count, 0) AS duplicate_facility_record_count,
+  coalesce(f.service_ready_facility_count, 0) AS service_ready_facility_count,
+  coalesce(f.emergency_ready_facility_count, 0) AS emergency_ready_facility_count,
+  coalesce(f.maternal_ready_facility_count, 0) AS maternal_ready_facility_count,
+  coalesce(f.facility_quality_signal_count, 0) AS facility_quality_signal_count,
+  coalesce(f.facility_quality_warning_count, 0) AS facility_quality_warning_count,
   coalesce(p.postal_office_count, 0) AS postal_office_count,
   coalesce(p.pincode_count, 0) AS pincode_count,
   coalesce(p.valid_postal_office_count, 0) AS valid_postal_office_count,
