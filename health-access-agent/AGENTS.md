@@ -61,7 +61,7 @@ Use this workflow for new issues or feature/fix requests in this repository.
 
    Edit conflicted files carefully, preserve user work, rerun relevant checks, commit the merge/conflict resolution, and push the branch again.
 
-6. Merge back to `main` only after the branch is verified and conflicts are resolved.
+6. After verification passes and conflicts are resolved, merge back to `main` automatically. Do not pause for another confirmation unless checks fail, conflicts remain unresolved, deployment requires explicit approval, or the user explicitly asks for review before merge.
 
    ```bash
    gh pr merge --merge --delete-branch
