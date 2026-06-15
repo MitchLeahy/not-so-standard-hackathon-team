@@ -19,15 +19,21 @@ test('smoke test - app loads and displays home page', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByRole('heading', { name: APP_CONFIG.name })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'CareGap Planner' })).toBeVisible();
-  await expect(page.getByText('Coverage after repair')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'CareGap Command Center' })).toBeVisible();
+  await expect(page.getByText('Medical desert queue')).toBeVisible();
+  await expect(page.getByText('India access intelligence map')).toBeVisible();
+  await expect(page.getByText('Evidence & trust desk')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Scenario simulator' })).toBeVisible();
+  await expect(page.getByText('Facility claim extraction', { exact: true })).toBeVisible();
+  await expect(page.getByText('Contradiction flags', { exact: true })).toBeVisible();
   await expect(page.getByText('Data repair ledger')).toBeVisible();
-  await expect(page.getByText('District queue')).toBeVisible();
-  await expect(page.getByText('Evidence brief')).toBeVisible();
-  await expect(page.getByText('Geography crosswalk')).toBeVisible();
-  await expect(page.getByText('Pincode-assisted facility matching')).toBeVisible();
-  await expect(page.getByText('District geo index')).toBeVisible();
-  await expect(page.getByText('Pincode coordinate validation')).toBeVisible();
+  await expect(page.getByText('Impact tracker')).toBeVisible();
+  await expect(page.getByText('Official boundary limitation')).toBeVisible();
+  await expect(page.getByText('Facility dedupe and readiness')).toBeVisible();
+  await expect(page.getByText('deduped facility profiles').first()).toBeVisible();
+  await expect(page.getByText('service-ready facilities').first()).toBeVisible();
+  await expect(page.getByText('quality warnings').first()).toBeVisible();
+  await expect(page.getByText('Recommended planner note')).toBeVisible();
 });
 
 // ── Lifecycle hooks ─────────────────────────────────────────────────────────

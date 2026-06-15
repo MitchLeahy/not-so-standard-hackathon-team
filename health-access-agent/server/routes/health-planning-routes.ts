@@ -20,6 +20,13 @@ const DISTRICT_COLUMNS = `
   pincode_matched_facility_count,
   city_matched_facility_count,
   coordinate_matched_facility_count,
+  deduped_facility_count,
+  duplicate_facility_record_count,
+  service_ready_facility_count,
+  emergency_ready_facility_count,
+  maternal_ready_facility_count,
+  facility_quality_signal_count,
+  facility_quality_warning_count,
   postal_office_count,
   pincode_count,
   valid_postal_office_count,
@@ -65,6 +72,10 @@ function interventionPlan(row: Record<string, unknown>) {
   const water = asNumber(row.hh_improved_water_pct);
   const screening = asNumber(row.women_age_30_49_years_ever_undergone_a_cervical_screen_pct);
   const facilities = asNumber(row.facility_count);
+  const dedupedFacilities = asNumber(row.deduped_facility_count);
+  const serviceReadyFacilities = asNumber(row.service_ready_facility_count);
+  const emergencyReadyFacilities = asNumber(row.emergency_ready_facility_count);
+  const maternalReadyFacilities = asNumber(row.maternal_ready_facility_count);
   const mappedFacilities = asNumber(row.mapped_facility_count);
   const postalOffices = asNumber(row.postal_office_count);
 
@@ -77,6 +88,26 @@ function interventionPlan(row: Record<string, unknown>) {
 
   const deliveryAssets: string[] = [];
   if (facilities > 0) deliveryAssets.push(`${facilities} known facility record${facilities === 1 ? '' : 's'}`);
+  if (dedupedFacilities > 0) {
+    deliveryAssets.push(
+      `${dedupedFacilities} deduped facility profile${dedupedFacilities === 1 ? '' : 's'} for planning`
+    );
+  }
+  if (serviceReadyFacilities > 0) {
+    deliveryAssets.push(
+      `${serviceReadyFacilities} service-ready facility profile${serviceReadyFacilities === 1 ? '' : 's'}`
+    );
+  }
+  if (emergencyReadyFacilities > 0) {
+    deliveryAssets.push(
+      `${emergencyReadyFacilities} emergency-readiness signal${emergencyReadyFacilities === 1 ? '' : 's'}`
+    );
+  }
+  if (maternalReadyFacilities > 0) {
+    deliveryAssets.push(
+      `${maternalReadyFacilities} maternal or child-health readiness signal${maternalReadyFacilities === 1 ? '' : 's'}`
+    );
+  }
   if (mappedFacilities > 0) {
     deliveryAssets.push(
       `${mappedFacilities} facility record${mappedFacilities === 1 ? '' : 's'} with valid India coordinates`
@@ -101,6 +132,7 @@ function interventionPlan(row: Record<string, unknown>) {
       `Institutional births: ${institutionalBirth.toFixed(1)}%.`,
       `Households with a member covered by health insurance: ${insurance.toFixed(1)}%.`,
       `Facility and postal counts use the repaired geography crosswalk and pincode-assisted matching view.`,
+      `Deduped and readiness counts are derived from cluster IDs, normalized facility identity, service fields, contact fields, staffing/capacity, and trust signals.`,
     ],
     caveat:
       'Remaining zero counts are still coverage warnings, not proof that a district has no facilities or postal offices.',
@@ -135,6 +167,13 @@ export async function setupHealthPlanningRoutes(appkit: AppKitWithLakebase) {
               SUM(pincode_matched_facility_count) AS pincode_matched_facility_count,
               SUM(city_matched_facility_count) AS city_matched_facility_count,
               SUM(coordinate_matched_facility_count) AS coordinate_matched_facility_count,
+              SUM(deduped_facility_count) AS deduped_facility_count,
+              SUM(duplicate_facility_record_count) AS duplicate_facility_record_count,
+              SUM(service_ready_facility_count) AS service_ready_facility_count,
+              SUM(emergency_ready_facility_count) AS emergency_ready_facility_count,
+              SUM(maternal_ready_facility_count) AS maternal_ready_facility_count,
+              SUM(facility_quality_signal_count) AS facility_quality_signal_count,
+              SUM(facility_quality_warning_count) AS facility_quality_warning_count,
               SUM(postal_office_count) AS postal_office_count,
               SUM(pincode_count) AS pincode_count,
               SUM(valid_postal_office_count) AS valid_postal_office_count,
@@ -185,8 +224,20 @@ export async function setupHealthPlanningRoutes(appkit: AppKitWithLakebase) {
               coordinateMatchedFacilities: 0,
               validPostalOfficeCoordinatesSurfaced: 0,
               invalidPostalCoordinateWarnings: 0,
+              dedupedFacilityCount: 9925,
+              duplicateFacilityRecordCount: 0,
+              serviceReadyFacilityCount: 0,
+              emergencyReadyFacilityCount: 0,
+              maternalReadyFacilityCount: 0,
+              facilityQualitySignalCount: 0,
+              facilityQualityWarningCount: 0,
             },
             fixes: [
+              {
+                title: 'Official boundary limitation',
+                detail:
+                  'No accessible district boundary, polygon, or administrative shape table was found in the workspace, so the demo keeps the pincode-derived district envelope as an explicit proxy.',
+              },
               {
                 title: 'Geography crosswalk',
                 detail:
@@ -211,6 +262,11 @@ export async function setupHealthPlanningRoutes(appkit: AppKitWithLakebase) {
                 title: 'Pincode coordinate validation',
                 detail:
                   'Postal and pincode counts now separate total coverage from rows with valid coordinates and rows flagged as unparseable or outside India bounds.',
+              },
+              {
+                title: 'Facility dedupe and readiness',
+                detail:
+                  'Facility claims are now grouped by cluster ID or normalized identity, with duplicate records separated from service-ready, emergency-ready, maternal-ready, and quality-signal counts.',
               },
             ],
           },
