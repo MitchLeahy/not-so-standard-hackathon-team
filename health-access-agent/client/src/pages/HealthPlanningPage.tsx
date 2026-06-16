@@ -12,16 +12,20 @@ import {
 } from '@databricks/appkit-ui/react';
 import {
   Ambulance,
+  AlertTriangle,
   BadgeCheck,
   Building2,
   CheckCircle2,
   ClipboardList,
+  Crosshair,
   Database,
   FileSearch,
+  Gauge,
   HeartPulse,
   Hospital,
   MapPin,
   MessageSquareText,
+  Navigation,
   RadioTower,
   RefreshCcw,
   Route,
@@ -46,6 +50,9 @@ interface Summary {
   maternal_ready_facility_count: string | number;
   facility_quality_signal_count: string | number;
   facility_quality_warning_count: string | number;
+  districts_with_accessibility_estimate: string | number;
+  avg_nearest_service_ready_distance_km: string | number;
+  avg_estimated_travel_minutes: string | number;
   postal_office_count: string | number;
   pincode_count: string | number;
   valid_postal_office_count: string | number;
@@ -76,6 +83,10 @@ interface District {
   maternal_ready_facility_count: string | number;
   facility_quality_signal_count: string | number;
   facility_quality_warning_count: string | number;
+  nearest_service_ready_facility_name?: string;
+  nearest_service_ready_distance_km?: string | number | null;
+  estimated_travel_minutes?: string | number | null;
+  accessibility_method?: string;
   postal_office_count: string | number;
   pincode_count: string | number;
   valid_postal_office_count: string | number;
@@ -179,6 +190,11 @@ function asNumber(value: string | number | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function optionalNumber(value: string | number | null | undefined): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function clamp(value: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
 }
@@ -250,7 +266,97 @@ function districtAccess(district: District) {
 }
 
 function travelMinutes(district: District) {
+  const estimate = optionalNumber(district.estimated_travel_minutes);
+  if (estimate !== null) return Math.round(estimate);
   return Math.round(45 + districtNeed(district) * 0.7 + (100 - districtAccess(district)) * 0.55);
+}
+
+function nearestDistanceKm(district: District) {
+  return optionalNumber(district.nearest_service_ready_distance_km);
+}
+
+function readinessGap(district: District) {
+  return clamp(
+    100 - percent(district.service_ready_facility_count, Math.max(1, asNumber(district.deduped_facility_count)))
+  );
+}
+
+function evidenceRisk(district: District) {
+  const facilityWarningPressure = percent(
+    district.facility_quality_warning_count,
+    Math.max(1, asNumber(district.facility_quality_signal_count))
+  );
+  const duplicatePressure = percent(
+    district.duplicate_facility_record_count,
+    Math.max(1, asNumber(district.facility_count))
+  );
+  const postalRisk = percent(
+    district.invalid_postal_coordinate_count,
+    Math.max(1, asNumber(district.postal_office_count))
+  );
+  return clamp(Math.round(facilityWarningPressure * 0.45 + duplicatePressure * 0.25 + postalRisk * 0.3));
+}
+
+function medicalGapScore(district: District) {
+  const need = districtNeed(district);
+  const accessPenalty = 100 - districtAccess(district);
+  const trustPenalty = 100 - districtTrust(district);
+  const travelPenalty = clamp((travelMinutes(district) / 150) * 100);
+  return clamp(
+    Math.round(
+      need * 0.4 + accessPenalty * 0.22 + trustPenalty * 0.18 + travelPenalty * 0.14 + evidenceRisk(district) * 0.06
+    )
+  );
+}
+
+function gapProfile(district: District, track: CareTrack) {
+  const serviceReady = asNumber(district.service_ready_facility_count);
+  const maternalReady = asNumber(district.maternal_ready_facility_count);
+  const emergencyReady = asNumber(district.emergency_ready_facility_count);
+  const warnings =
+    asNumber(district.facility_quality_warning_count) + asNumber(district.invalid_postal_coordinate_count);
+  const distance = nearestDistanceKm(district);
+
+  if (track === 'maternal' && maternalReady === 0) {
+    return {
+      label: 'Maternal readiness gap',
+      action: 'Stage obstetric referral and verify delivery capability first',
+      reason: 'No maternal-ready profile is visible in the repaired district table.',
+    };
+  }
+  if (track === 'trauma' && emergencyReady === 0) {
+    return {
+      label: 'Emergency readiness gap',
+      action: 'Prioritize stabilization, ambulance handoff, and emergency-capable partner validation',
+      reason: 'Emergency-readiness signals are absent for the selected district.',
+    };
+  }
+  if (serviceReady === 0) {
+    return {
+      label: 'Service-ready desert',
+      action: 'Find the nearest same-state service-ready node before field deployment',
+      reason: 'Facility claims exist, but no service-ready profile is available for planning.',
+    };
+  }
+  if (distance !== null && distance >= 50) {
+    return {
+      label: 'Reach gap',
+      action: 'Use validated pincodes to route outreach toward the nearest service-ready facility',
+      reason: `Nearest service-ready profile is ${distance.toFixed(1)} km from the district centroid.`,
+    };
+  }
+  if (warnings > 0) {
+    return {
+      label: 'Evidence gap',
+      action: 'Resolve warning rows and duplicate claims before capacity commitments',
+      reason: `${warnings.toLocaleString()} quality or geography warnings need review.`,
+    };
+  }
+  return {
+    label: 'Need-led expansion gap',
+    action: 'Deploy the selected care track through verified local and referral nodes',
+    reason: 'Need remains high even after repaired facility, readiness, and postal reach signals are visible.',
+  };
 }
 
 function projectLonLat(lon: number, lat: number) {
@@ -312,7 +418,10 @@ export function HealthPlanningPage() {
   const [selectedDistrictKey, setSelectedDistrictKey] = useState('');
   const [committedAction, setCommittedAction] = useState('');
 
-  const districts = useMemo(() => overview?.priorities ?? [], [overview]);
+  const districts = useMemo(
+    () => [...(overview?.priorities ?? [])].sort((a, b) => medicalGapScore(b) - medicalGapScore(a)),
+    [overview]
+  );
   const selectedDistrict = useMemo(
     () => districts.find((district) => district.district_key === selectedDistrictKey) ?? districts[0],
     [districts, selectedDistrictKey]
@@ -352,6 +461,17 @@ export function HealthPlanningPage() {
   const selectedAccess = selectedDistrict ? districtAccess(selectedDistrict) : 0;
   const selectedTrust = selectedDistrict ? districtTrust(selectedDistrict) : 0;
   const selectedTravel = selectedDistrict ? travelMinutes(selectedDistrict) : 0;
+  const selectedGapScore = selectedDistrict ? medicalGapScore(selectedDistrict) : 0;
+  const selectedReadinessGap = selectedDistrict ? readinessGap(selectedDistrict) : 0;
+  const selectedEvidenceRisk = selectedDistrict ? evidenceRisk(selectedDistrict) : 0;
+  const selectedDistance = selectedDistrict ? nearestDistanceKm(selectedDistrict) : null;
+  const selectedGapProfile = selectedDistrict
+    ? gapProfile(selectedDistrict, track)
+    : {
+        label: 'No district selected',
+        action: 'Select a district to calculate the care gap',
+        reason: 'The gap score needs a district row from the repaired planning table.',
+      };
   const facilityLift = asNumber(summary.districts_with_facilities) - dataQuality.before.districtsWithFacilities;
   const latestFacilityLift =
     asNumber(summary.districts_with_facilities) - dataQuality.currentRoundBefore.districtsWithFacilities;
@@ -359,7 +479,11 @@ export function HealthPlanningPage() {
   const validPincodeShare = percent(summary.valid_pincode_count, summary.pincode_count);
   const trustedFacilityShare = percent(summary.service_ready_facility_count, summary.deduped_facility_count);
   const pincodeFacilityShare = percent(summary.pincode_matched_facility_count, summary.facility_count);
+  const accessibilityCoverage = percent(summary.districts_with_accessibility_estimate, summary.district_count);
+  const avgTravelMinutes = optionalNumber(summary.avg_estimated_travel_minutes);
+  const avgNearestDistance = optionalNumber(summary.avg_nearest_service_ready_distance_km);
   const duplicateClaims = asNumber(summary.duplicate_facility_record_count);
+  const readinessDeserts = asNumber(summary.districts_zero_facilities);
   const peopleReached = selectedDistrict
     ? Math.round((selectedNeed * 1800 + asNumber(selectedDistrict.valid_pincode_count) * 12000) / 1000) * 1000
     : 0;
@@ -373,12 +497,12 @@ export function HealthPlanningPage() {
     y: selectedMapPosition.svgY,
   };
   const localNode = {
-    x: Math.min(760, selectedMapPoint.x + 58),
-    y: Math.max(72, selectedMapPoint.y - 38),
+    x: clamp(selectedMapPoint.x + 54, 250, 520),
+    y: clamp(selectedMapPoint.y - 72, 150, 410),
   };
   const referralNode = {
-    x: Math.min(770, selectedMapPoint.x + 168),
-    y: Math.min(450, selectedMapPoint.y + 36),
+    x: clamp(selectedMapPoint.x + 132, 430, 532),
+    y: clamp(selectedMapPoint.y + 74, 175, 428),
   };
 
   return (
@@ -396,8 +520,9 @@ export function HealthPlanningPage() {
                 CareGap Command Center
               </h2>
               <p className="max-w-4xl text-base text-muted-foreground">
-                A planner cockpit for ranking medical deserts, proving uncertainty, and choosing the next operational
-                move from NFHS need, facility claims, pincode reach, and geospatial data quality.
+                India medical gap finder for ranking districts by need, reachable readiness, and evidence risk, then
+                choosing the next operational move from NFHS indicators, facility claims, pincode reach, and travel
+                estimates.
               </p>
             </div>
             <div className="flex flex-wrap gap-2" aria-label="Care track selector">
@@ -423,10 +548,85 @@ export function HealthPlanningPage() {
               label="Quality warnings"
               value={formatNumber(summary.facility_quality_warning_count)}
             />
-            <RibbonKpi icon={<Route />} label="Avg travel" value={`${selectedTravel}m`} />
+            <RibbonKpi
+              icon={<Route />}
+              label="Avg travel"
+              value={`${Math.round(avgTravelMinutes ?? selectedTravel)}m`}
+            />
           </div>
         </div>
       </section>
+
+      {selectedDistrict && selectedGapProfile && (
+        <section className="grid gap-5 rounded-md border bg-background p-5 xl:grid-cols-[minmax(0,1fr)_460px]">
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="mb-2 flex flex-wrap gap-2">
+                  <Badge variant="secondary">India medical gap finder</Badge>
+                  <Badge variant="outline">{overview.source.refreshMode}</Badge>
+                </div>
+                <h3 className="text-xl font-semibold">Find the highest-friction gap before placing care capacity</h3>
+                <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
+                  The worklist ranks districts by a blended gap score: NFHS need, service-ready access, data trust,
+                  travel burden, and warning pressure. Higher scores mean the planner should intervene before assuming
+                  local capacity exists.
+                </p>
+              </div>
+              <Badge variant="destructive">Top gap score {selectedGapScore}/100</Badge>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-4">
+              <GapKpi
+                icon={<AlertTriangle />}
+                label="Readiness deserts"
+                value={readinessDeserts.toLocaleString()}
+                detail="districts with zero facility coverage"
+              />
+              <GapKpi
+                icon={<Navigation />}
+                label="Access modeled"
+                value={`${accessibilityCoverage}%`}
+                detail={`${Math.round(avgNearestDistance ?? 0)} km avg nearest ready node`}
+              />
+              <GapKpi
+                icon={<ShieldCheck />}
+                label="Service-ready share"
+                value={`${trustedFacilityShare}%`}
+                detail={`${formatNumber(summary.service_ready_facility_count)} verified planning profiles`}
+              />
+              <GapKpi
+                icon={<Gauge />}
+                label="Evidence risk"
+                value={formatNumber(summary.facility_quality_warning_count)}
+                detail="facility quality warnings to review"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-md border bg-muted/20 p-4">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm text-muted-foreground">Selected district diagnosis</div>
+                <div className="text-lg font-semibold">
+                  {selectedDistrict.district_name}, {selectedDistrict.state_ut}
+                </div>
+              </div>
+              <Badge variant="outline">{selectedGapProfile.label}</Badge>
+            </div>
+            <div className="space-y-3">
+              <GapBar label="Need intensity" value={selectedNeed} />
+              <GapBar label="Readiness gap" value={selectedReadinessGap} />
+              <GapBar label="Travel burden" value={clamp((selectedTravel / 150) * 100)} />
+              <GapBar label="Evidence risk" value={selectedEvidenceRisk} />
+            </div>
+            <div className="mt-4 rounded-md border bg-background p-3">
+              <div className="text-sm font-semibold">{selectedGapProfile.action}</div>
+              <div className="mt-1 text-xs text-muted-foreground">{selectedGapProfile.reason}</div>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)_430px]">
         <Card className="overflow-hidden">
@@ -435,6 +635,9 @@ export function HealthPlanningPage() {
               <SearchCheck className="h-5 w-5" />
               Medical desert queue
             </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Sorted by medical gap score across need, readiness, reach, and evidence risk.
+            </p>
           </CardHeader>
           <CardContent>
             <ScrollArea className="h-[650px] pr-3">
@@ -443,6 +646,8 @@ export function HealthPlanningPage() {
                   const selected = selectedDistrict?.district_key === district.district_key;
                   const access = districtAccess(district);
                   const trust = districtTrust(district);
+                  const gap = medicalGapScore(district);
+                  const profile = gapProfile(district, track);
                   return (
                     <button
                       key={district.district_key}
@@ -455,13 +660,17 @@ export function HealthPlanningPage() {
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
                           {index + 1}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="font-semibold text-foreground">
                             {district.district_name}, {district.state_ut}
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {travelMinutes(district)} min to trusted care
                           </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-semibold text-destructive">{gap}</div>
+                          <div className="text-[11px] uppercase text-muted-foreground">gap</div>
                         </div>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-xs">
@@ -470,6 +679,10 @@ export function HealthPlanningPage() {
                         <Score label="Trust" tone={trust < 50 ? 'warning' : 'success'} value={trust} />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-1.5">
+                        <Badge variant="secondary">
+                          <Crosshair className="h-3 w-3" />
+                          {profile.label}
+                        </Badge>
                         <Badge variant="outline">
                           {formatNumber(district.deduped_facility_count)} deduped facilities
                         </Badge>
@@ -630,16 +843,16 @@ export function HealthPlanningPage() {
                   </text>
                 </g>
 
-                <g transform="translate(158 44)">
-                  <rect width="232" height="92" rx="8" fill="#ffffff" stroke="#d1d5db" opacity="0.97" />
+                <g transform="translate(440 44)">
+                  <rect width="230" height="82" rx="8" fill="#ffffff" stroke="#d1d5db" opacity="0.97" />
                   <text x="14" y="25" fontSize="14" fill="#111827" fontWeight="800">
                     Access model
                   </text>
-                  <text x="14" y="50" fontSize="12" fill="#6b7280">
-                    rings: 60 / 120 min reach
+                  <text x="14" y="49" fontSize="12" fill="#6b7280">
+                    rings: 60 / 120 min
                   </text>
-                  <text x="14" y="70" fontSize="12" fill="#6b7280">
-                    routes: verify to refer to partner
+                  <text x="14" y="67" fontSize="12" fill="#6b7280">
+                    routes: verify then refer
                   </text>
                 </g>
               </svg>
@@ -663,37 +876,43 @@ export function HealthPlanningPage() {
                   </button>
                 );
               })}
+            </div>
 
-              {selectedDistrict && (
-                <>
-                  <div className="absolute bottom-4 left-4 right-4 z-30 rounded-md border bg-background/95 p-4 shadow-sm backdrop-blur">
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="text-lg font-semibold">
-                          {selectedDistrict.district_name}, {selectedDistrict.state_ut}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          High need meets low trusted access: {formatNumber(selectedDistrict.facility_count)} facility
-                          claims, {formatNumber(selectedDistrict.deduped_facility_count)} deduped profiles,{' '}
-                          {formatNumber(selectedDistrict.valid_pincode_count)} validated pincodes, and{' '}
-                          {formatNumber(selectedDistrict.facility_quality_warning_count)} facility quality warnings.
-                        </div>
-                      </div>
-                      <Badge variant="destructive">{selectedTravel} min to trusted care</Badge>
+            {selectedDistrict && (
+              <div className="rounded-md border bg-background p-4 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold">
+                      {selectedDistrict.district_name}, {selectedDistrict.state_ut}
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <MapMetric
-                        label="Population proxy"
-                        value={`${peopleReached.toLocaleString()} reached`}
-                        percent={72}
-                      />
-                      <MapMetric label="Need score" value={`${selectedNeed}/100`} percent={selectedNeed} />
-                      <MapMetric label="Access score" value={`${selectedAccess}/100`} percent={selectedAccess} />
+                    <div className="text-sm text-muted-foreground">
+                      {selectedGapProfile.label}: {formatNumber(selectedDistrict.facility_count)} facility claims,{' '}
+                      {formatNumber(selectedDistrict.deduped_facility_count)} deduped profiles,{' '}
+                      {formatNumber(selectedDistrict.valid_pincode_count)} validated pincodes,{' '}
+                      {selectedDistance === null
+                        ? 'no measured nearest-ready distance'
+                        : `${selectedDistance.toFixed(1)} km to nearest ready node`}
+                      , and {formatNumber(selectedDistrict.facility_quality_warning_count)} facility quality warnings.
                     </div>
                   </div>
-                </>
-              )}
-            </div>
+                  <Badge variant="destructive">{selectedGapScore}/100 gap score</Badge>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <MapMetric
+                    label="Population proxy"
+                    value={`${peopleReached.toLocaleString()} reached`}
+                    percent={72}
+                  />
+                  <MapMetric label="Need score" value={`${selectedNeed}/100`} percent={selectedNeed} />
+                  <MapMetric label="Access score" value={`${selectedAccess}/100`} percent={selectedAccess} />
+                  <MapMetric
+                    label="Travel estimate"
+                    value={`${selectedTravel} min`}
+                    percent={clamp((selectedTravel / 150) * 100)}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-3 sm:grid-cols-2">
               <PipelineStep
@@ -788,7 +1007,7 @@ export function HealthPlanningPage() {
             {selectedDistrict ? (
               <>
                 <div className="grid grid-cols-3 gap-3">
-                  <SignalTile label="Need" value={selectedNeed} tone="danger" />
+                  <SignalTile label="Gap" value={selectedGapScore} tone="danger" />
                   <SignalTile label="Access" value={selectedAccess} tone="warning" />
                   <SignalTile label="Trust" value={selectedTrust} tone="success" />
                 </div>
@@ -859,6 +1078,12 @@ export function HealthPlanningPage() {
                     stay separate at {formatNumber(selectedDistrict.postal_office_count)}.
                   </EvidenceLine>
                   <EvidenceLine>
+                    Accessibility: nearest service-ready profile is{' '}
+                    {selectedDistance === null ? 'not yet measurable' : `${selectedDistance.toFixed(1)} km away`};
+                    travel estimate is {selectedTravel} minutes using{' '}
+                    {selectedDistrict.accessibility_method || 'the district centroid model'}.
+                  </EvidenceLine>
+                  <EvidenceLine>
                     Repair lift: {dataQuality.currentRoundBefore.facilityRecordsMatched.toLocaleString()} to{' '}
                     {formatNumber(summary.facility_count)} matched facility records, with coordinate fallback visible in
                     the match split.
@@ -871,9 +1096,10 @@ export function HealthPlanningPage() {
                     Recommended planner note
                   </div>
                   <p className="text-sm text-slate-200">
-                    {selectedDistrict.district_name} should be prioritized for {selectedTrack.label.toLowerCase()} using
-                    the repaired district planning table. Verify uncertain claims first, treat invalid postal
-                    coordinates as warnings, then use validated pincode reach for the field plan.
+                    {selectedDistrict.district_name} should be prioritized for {selectedTrack.label.toLowerCase()} as a{' '}
+                    {selectedGapProfile.label.toLowerCase()}. {selectedGapProfile.action}. Verify uncertain claims
+                    first, treat invalid postal coordinates as warnings, then use validated pincode reach for the field
+                    plan.
                   </p>
                 </div>
               </>
@@ -934,6 +1160,32 @@ function RibbonKpi({ icon, label, value }: { icon: ReactNode; label: string; val
         {label}
       </div>
       <div className="text-2xl font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function GapKpi({ detail, icon, label, value }: { detail: string; icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="min-h-32 rounded-md border bg-muted/20 p-4">
+      <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="[&>svg]:h-4 [&>svg]:w-4">{icon}</span>
+        {label}
+      </div>
+      <div className="text-2xl font-semibold">{value}</div>
+      <div className="mt-2 text-xs text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
+function GapBar({ label, value }: { label: string; value: number }) {
+  const rounded = Math.round(clamp(value));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-semibold">{rounded}</span>
+      </div>
+      <Progress value={rounded} />
     </div>
   );
 }
