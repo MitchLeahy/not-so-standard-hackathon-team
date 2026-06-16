@@ -20,6 +20,11 @@ test('smoke test - app loads and displays home page', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: APP_CONFIG.name })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'CareGap Command Center' })).toBeVisible();
+  await expect(page.getByText('India medical gap finder', { exact: true })).toBeVisible();
+  await expect(page.getByText('Find the highest-friction gap before placing care capacity')).toBeVisible();
+  await expect(page.getByText('Readiness deserts')).toBeVisible();
+  await expect(page.getByText('Access modeled')).toBeVisible();
+  await expect(page.getByText('Selected district diagnosis')).toBeVisible();
   await expect(page.getByText('Medical desert queue')).toBeVisible();
   await expect(page.getByText('India access intelligence map')).toBeVisible();
   await expect(page.getByText('Evidence & trust desk')).toBeVisible();
